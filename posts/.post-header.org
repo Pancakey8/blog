@@ -1,0 +1,10 @@
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="post-style.css" />
+#+OPTIONS: html-postamble:nil
+#+OPTIONS: title:nil author:nil date:nil toc:nil
+
+@@html:<div id="post-head">@@
+@@html:<h1 id="post-title">@@{{{title}}}@@html:</h1>@@
+@@html:<h3 id="post-creation">@@{{{author}}} | {{{date}}}@@html:</h3>@@
+@@html:</div>@@
+
+#+TOC: headlines 2

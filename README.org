@@ -1,0 +1,3 @@
+* Blog
+
+Pancake's blog about programming and other stuff

@@ -1,6 +1,8 @@
+#+INCLUDE: .post-header.org
+
 #+TITLE: Coroutines with Duff's Device: A Journey of C Macros
 #+AUTHOR: Pancake
-#+DATE: <2026-05-12 Tue>
+#+DATE: 2026-05-12
 
 Coroutines are a common feature found in modern languages. Often
 presented as =async= & =await=, coroutines allow a single function to
@@ -281,10 +283,10 @@ actual entrypoint of the routine.
     __VA_ARGS__                                 \
   }* local = state->data;                       \
   switch (state->step) {                        \
-  case 0:					\
-    state->data = calloc(1, sizeof(*local));	\
-    state->step = 1;				\
-    return true;				\
+  case 0:                                       \
+    state->data = calloc(1, sizeof(*local));    \
+    state->step = 1;                            \
+    return true;                                \
   case 1:
 #+END_SRC
 
@@ -293,12 +295,12 @@ closing out the switch.
 
 #+NAME: coroutines02-end-macro
 #+BEGIN_SRC c
-#define co_end		\
-  free(state->data);	\
-  state->step = -1;	\
-  return false;		\
-  default:		\
-    return false;	\
+#define co_end          \
+  free(state->data);    \
+  state->step = -1;     \
+  return false;         \
+  default:              \
+    return false;       \
   }
 #+END_SRC
 
@@ -311,9 +313,9 @@ would conflict.
 #+BEGIN_SRC c
   #define co_yield              \
     do {                        \
-      state->step = __LINE__;	\
-      return true;		\
-    case __LINE__:		\
+      state->step = __LINE__;   \
+      return true;              \
+    case __LINE__:              \
     } while (0)
 #+END_SRC
 
