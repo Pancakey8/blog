@@ -1,0 +1,518 @@
+#+TITLE: Coroutines with Duff's Device: A Journey of C Macros
+#+AUTHOR: Pancake
+#+DATE: <2026-05-12 Tue>
+
+Coroutines are a common feature found in modern languages. Often
+presented as =async= & =await=, coroutines allow a single function to
+be broken up into small pieces. By running portions of each function
+cooperatively, multiple routines can progress in the same thread,
+separating concurrency from threading.
+
+Though this feature isn't natively found in C, today we will explore a
+trick to achieve a close approximation of a /stackless/ coroutine.
+
+** Duff's Device
+
+A =Duff's Device= is a mechanism to manually unroll loops, wherein a
+loop that runs a single step per iteration is reduced to a loop of
+fewer iterations, where each iteration runs steps multiple times.
+
+#+NAME: loop-unroll-canonical
+#+BEGIN_SRC c
+  for (int i = N; i-- > 0; ) {
+    printf("%d\n", i);
+  }
+#+END_SRC
+
+For a loop of ~N=16~, unrolling the loop into 4 steps per iteration is
+a simple case since 4 divides 16 without remainders.
+
+#+NAME: loop-unroll-trivial
+#+BEGIN_SRC c
+  int iteration_count = N / 4;
+  int i = N;
+  do {
+    printf("%d\n", --i);
+    printf("%d\n", --i);
+    printf("%d\n", --i);
+    printf("%d\n", --i);
+  } while (--iteration_count > 0);
+#+END_SRC
+
+In the snippet above, the loop runs only ~1/4~-th the iterations of
+the original loop. Since the loop runs 4 steps per iteration, however,
+the total action is preserved.
+
+Though unrolling for clean divisions is straightforward, if ~N~ were
+17, the snippet above would still run 16 total steps. =Duff's device=
+is implemented to handle the remainder cases, running an additional
+~N % 4~ steps.
+
+#+NAME: loop-unroll-duffs
+#+BEGIN_SRC c
+  int iteration_count = (N + 3) / 4;
+  int i = N;
+  switch (N % 4) {
+  case 0:
+    do {
+      printf("%d\n", --i);
+  case 3:
+      printf("%d\n", --i);
+  case 2:
+      printf("%d\n", --i);
+  case 1:
+      printf("%d\n", --i);
+    } while (--iteration_count > 0);
+  }
+#+END_SRC
+
+There are a few things to unpack here. First, ~case~'s are allowed
+inside a deeper scope than the curly braces of the switch. This means,
+depending on the result of the remainder ~N % 4~, the loop will start
+at a different point. For a remainder of 0, since ~(N + 3) / 4~ would
+be equal to ~N / 4~, the loop initiates from the beginning, making it
+equivalent to the simple unrolling example.
+
+For non-zero values of ~N % 4~, the ~iteration_count~ of this example
+rounds up instead of truncating, making it one higher than in the
+previous example. The additional first iteration, however, is not
+initiated from the beginning. Rather, the loop only runs as many steps
+as ~N % 4~: ~case 1~ is followed by only one step, but ~case 3~ is
+followed by three steps.
+
+To sum up, the Duff's Device uses ~switch~ as a control flow element,
+choosing to jump to different points of the loop on the first
+iteration.
+
+Though the manual unrolling of loops is unnecessary for
+modern systems, this clever use of ~switch~ is going to be the insight
+we need when building our coroutines.
+
+#+BEGIN_SRC c :tangle duffs-device.c :noweb yes :exports none
+  #include <stdio.h>
+
+  int main(void) {
+    int N = 16;
+    {
+    <<loop-unroll-canonical>>
+    }
+
+    {
+    <<loop-unroll-trivial>>
+    }
+
+    N = 17;
+    {
+    <<loop-unroll-duffs>>
+    }
+    return 0;
+  }
+#+END_SRC
+
+** Coroutines: A Thought
+
+A coroutine is fundamentally a method of pausing and resuming
+functions. This can be interpreted as a stateful re-entry onto the
+same function, where the function decides its resumption point based
+on this state.
+
+Based on the mechanism and insight powering the Duff's Device,
+state-based control flow can be achieved with a ~switch~, which is the
+main object behind the coroutines proposed here.
+
+#+NAME: coroutines01-minimal
+#+BEGIN_SRC c
+  bool foo(int *state) {
+    switch (*state) {
+    case 0:
+      printf("Start\n");
+      ,*state = 1;
+      return true; // Signal that function can resume
+    case 1:
+      printf("Middle\n");
+      ,*state = 2;
+      return true;
+    case 2:
+      printf("Finish\n");
+      ,*state = -1; // Sentinel value
+      return false;
+    default: return false;
+    }
+  }
+#+END_SRC
+
+The snippet above tracks a state ~int *state~, which is initialised as
+~0~. From ~0~, once the 'scope' is complete, ~state~ is updated as ~1~
+and the function returns with a signal that resumption is possible.
+
+Running the function until a return value of ~false~ evaluates the
+full routine.
+
+#+NAME: coroutines01-minimal-call
+#+BEGIN_SRC c
+  int foo_state = 0;
+  while (foo(&foo_state)) ;
+#+END_SRC
+
+Output:
+
+#+BEGIN_SRC
+Start
+Middle
+Finish
+#+END_SRC
+
+A second routine called ~bar~, whose code is identical to ~foo~ where
+only ~bar:~ is prepended to each ~printf~ message, can be run
+alongside ~foo~.
+
+#+NAME: coroutines01-concurrent-call
+#+BEGIN_SRC c
+  int foo_state = 0, bar_state = 0;
+  while (true) {
+    bool is_incomplete = foo(&foo_state);
+    is_incomplete |= bar(&bar_state);
+    if (!is_incomplete) break;
+  }
+#+END_SRC
+
+Output:
+
+#+BEGIN_SRC
+Start
+bar: Start
+Middle
+bar: Middle
+Finish
+bar: Finish
+#+END_SRC
+
+The loop above calls ~foo~ and ~bar~, before checking if either of the
+routines (noting ~is_incomplete = foo_return | bar_return~) is still
+resumable, breaking out of the loop otherwise.
+
+Some considerations here are:
+ - The system runs /stackless/, in that the local variables in ~foo~
+   and ~bar~ aren't preserved between runs, since /'pausing'/ returns
+   from the function.
+ - The state of each routine is managed by the caller, and
+   mismanagement can lead to unpredictable results, such as
+   double-evaluation or infinite loops.
+
+What we've built so far is a very hands-on and C-like system, where
+every action is explicit. This makes logic verbose, and requires
+strict maintenance of the ~case~ numbers and ~state~ values, among
+other things.
+
+#+BEGIN_SRC c :tangle coroutines-01.c :noweb yes :exports none
+  #include <stdio.h>
+
+  <<coroutines01-minimal>>
+
+  bool bar(int *state) {
+    switch (*state) {
+    case 0:
+      printf("bar: Start\n");
+      ,*state = 1;
+      return true; // Signal that function can resume
+    case 1:
+      printf("bar: Middle\n");
+      ,*state = 2;
+      return true;
+    case 2:
+      printf("bar: Finish\n");
+      ,*state = -1; // Sentinel value
+      return false;
+    default: return false;
+    }
+  }
+
+  int main(void) {
+    {
+    <<coroutines01-minimal-call>>
+    }
+    {
+    <<coroutines01-concurrent-call>>
+    }
+    return 0;
+  }
+#+END_SRC
+
+** The Power of the Preprocessor
+
+The C preprocessor is a text substitution tool. Though the literal
+nature of the preprocessor is a hindrance in common use cases, it is a
+perfect fit for abstractions around control flow. Nonetheless, the
+pitfalls and opaqueness of such abstractions are key factors during
+consumption, and the underlying systems, in addition to their
+limitations must not be forgotten.
+
+To abstract the ~switch~, at least two macros are needed: a ~co_begin~
+to cover the ~switch () {~ and a ~co_end~ to cover the ~default:~ case
+and the closing curly brace.
+
+In addition to the ~switch~, the macros shall initialise and free the
+persistent state, which will be stored in a heap allocation. A
+fixed-size allocation on the stack is equally valid depending on
+needs.
+
+A final ~co_yield~ macro will cover the ~case~ creation and return
+values.
+
+The coroutine state will be stored in a ~struct CoState~ as written
+below.
+
+#+NAME: coroutines02-state-struct
+#+BEGIN_SRC c
+  struct CoState {
+    int step;
+    void *data;
+  };
+#+END_SRC
+
+The begin macro creates an anonymous struct based on its
+arguments. ~step=0~ is used for initialisation, and ~step=1~ is the
+actual entrypoint of the routine.
+
+#+NAME: coroutines02-begin-macro
+#+BEGIN_SRC c
+#define co_begin(...)                           \
+  struct {                                      \
+    __VA_ARGS__                                 \
+  }* local = state->data;                       \
+  switch (state->step) {                        \
+  case 0:					\
+    state->data = calloc(1, sizeof(*local));	\
+    state->step = 1;				\
+    return true;				\
+  case 1:
+#+END_SRC
+
+The end macro deallocates ~data~ before setting a sentinel state and
+closing out the switch.
+
+#+NAME: coroutines02-end-macro
+#+BEGIN_SRC c
+#define co_end		\
+  free(state->data);	\
+  state->step = -1;	\
+  return false;		\
+  default:		\
+    return false;	\
+  }
+#+END_SRC
+
+The yield macro creates a case and sets the step, effectively pausing
+the routine at the yield point. Note the use of ~__LINE__~ here, which
+disallows two ~co_yield~ to exist on the same line, since the ~case~'s
+would conflict.
+
+#+NAME: coroutines02-yield-macro
+#+BEGIN_SRC c
+  #define co_yield              \
+    do {                        \
+      state->step = __LINE__;	\
+      return true;		\
+    case __LINE__:		\
+    } while (0)
+#+END_SRC
+
+Given these three macros, the ~foo~ from the previous section can be implemented as given below.
+
+#+BEGIN_SRC c
+  bool foo(struct CoState *state) {
+    co_begin();
+
+    printf("Start\n");
+    co_yield;
+    
+    printf("Middle\n");
+    co_yield;
+
+    printf("Finish\n");
+
+    co_end;
+  }
+#+END_SRC
+
+Expanding the macros, the switch/case structure reveals itself:
+
+#+BEGIN_SRC c
+  bool foo(struct CoState *state) {
+    struct {
+    } *local = state->data;
+    switch (state->step) {
+    case 0:
+      state->data = calloc(1, sizeof(*local));
+      state->step = 1;
+      return true;
+    case 1:;
+      printf("Start\n");
+      do {
+        state->step = 29;
+        return true;
+    case 29:
+      } while (0);
+      printf("Middle\n");
+      do {
+        state->step = 32;
+        return true;
+    case 32:
+      } while (0);
+      printf("Finish\n");
+      free(state->data);
+      state->step = -1;
+      return false;
+    default:
+      return false;
+    };
+  }
+#+END_SRC
+
+The use of ~do-while~ only allows patterns such as
+~if (condition) co_yield;~ to be valid, and has no bearing on
+the functionality. Besides that, the code mirrors the manual
+switch. The ~local~ state is unused here, so the struct remains
+empty; however, the state is still initialised, meaning the
+first call of ~foo~ no longer prints anything.
+
+#+BEGIN_SRC c
+  struct CoState st_foo = {};
+  foo(&st_foo); // Initialise ~local~ and pause
+  foo(&st_foo); // Print 'Start'
+  foo(&st_foo); // Print 'Middle'
+  foo(&st_foo); // Print 'Finish' and clean up
+  foo(&st_foo); // No-op
+#+END_SRC
+
+-----
+
+Recalling from the Duff's Device, ~case~ are allowed in loops and
+other scopes, meaning ~co_yield~ is allowed inside loops in the macro
+system, only excepting the use of ~switch~.
+
+#+NAME: coroutines02-loop-foo
+#+BEGIN_SRC c
+  bool foo(struct CoState* state) {
+    co_begin(
+      int i;
+    );
+
+    local->i = 5;
+
+    while (local->i-- > 0) {
+      printf("foo: %d\n", local->i);
+      co_yield;
+    }
+
+    co_end;
+  }
+#+END_SRC
+
+The ~foo~ routine above has a ~co_yield~ at the end of its
+loop. Reasoning abstractly, after the initialising call, our first
+call will run one iteration of the loop before yielding. Each call
+onward will run another iteration, until we exit the loop on the last
+call, reaching ~co_end~.
+
+A similar routine of 10 iterations, this time counting up, can be
+written as below.
+
+#+NAME: coroutines02-loop-bar
+#+BEGIN_SRC c
+  bool bar(struct CoState* state) {
+    co_begin(
+      int i;
+    );
+
+    local->i = 0;
+
+    while (local->i < 10) {
+      printf("bar: %d\n", local->i++);
+      co_yield;
+    }
+
+    co_end;
+  }
+#+END_SRC
+
+The routines can be called intertwined with the use of a loop as done
+in the previous section.
+
+#+NAME: coroutines02-foo-or-bar
+#+BEGIN_SRC c
+  struct CoState state_foo = {}, state_bar = {};
+  while (true) {
+    bool is_incomplete = foo(&state_foo);
+    is_incomplete |= bar(&state_bar);
+    if (!is_incomplete) break;
+  }
+#+END_SRC
+
+Output:
+
+#+BEGIN_SRC
+foo: 4
+bar: 0
+foo: 3
+bar: 1
+foo: 2
+bar: 2
+foo: 1
+bar: 3
+foo: 0
+bar: 4
+bar: 5
+bar: 6
+bar: 7
+bar: 8
+bar: 9
+#+END_SRC
+
+#+BEGIN_SRC c :tangle coroutines-02.c :noweb yes :exports none
+  #include <stdlib.h>
+  #include <stdio.h>
+
+  <<coroutines02-state-struct>>
+
+  <<coroutines02-begin-macro>>
+
+  <<coroutines02-end-macro>>
+
+  <<coroutines02-yield-macro>>
+
+  <<coroutines02-loop-foo>>
+
+  <<coroutines02-loop-bar>>
+
+  int main(void) {
+    {
+    <<coroutines02-foo-or-bar>>
+    }
+    return 0;
+  }
+#+END_SRC
+
+** Conclusion
+
+The system we've built here is a rudimentary coroutine system. Certain
+pitfalls, omitting many others, include:
+ - Data leak if we don't finish a coroutine (a ~co_abort~ is necessary)
+ - Breakages around ~break~ interactions with ~switch~
+ - A lack of return values (could be handled with out parameters in current context)
+ - No ~co_yield~ allowed inside switch statements, or alternatively,
+   no switch statements allowed in coroutines
+ - No way to tell if a coroutine is alive or not without calling it
+   (even if ~step~ can be manually checked, the approach is leaky)
+ - ...
+
+Even with all the pitfalls, the results are quite nice for C, so much
+so that the idea was previously done with [[https://en.wikipedia.org/wiki/Protothread][Protothreads]]! The approach
+of protothreads differs from our perspective in that it positions
+itself as a replacement for threads in systems that don't have them,
+for example in standalone programs, but the underlying systems are all
+the same.
+
+In conclusion, by exploring a component as simple as a switch
+statement, we've built a coroutine system, demonstrating the emergent
+nature of C macros and the features built on them.
