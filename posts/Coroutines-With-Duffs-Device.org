@@ -3,6 +3,7 @@
 #+TITLE: Coroutines with Duff's Device: A Journey of C Macros
 #+AUTHOR: Pancake
 #+DATE: 2026-05-12
+#+DESCRIPTION: Inspired by a quirk of C, we build a coroutine system.
 
 Coroutines are a common feature found in modern languages. Often
 presented as =async= & =await=, coroutines allow a single function to

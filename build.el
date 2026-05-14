@@ -17,8 +17,9 @@
     (insert-file-contents file)
     (let ((title (or (cadar (org-collect-keywords '("TITLE"))) "Untitled"))
           (date (or (cadar (org-collect-keywords '("DATE"))) ""))
+	  (desc (or (cadar (org-collect-keywords '("DESCRIPTION"))) ""))
           (filename (file-name-base file)))
-      (list title date filename))))
+      (list title date filename desc))))
 
 (defun my/generate-homepage ()
   "Create HTML list items from org files and inject into index.html."
@@ -43,6 +44,8 @@
                      (while (search-forward "{{{title}}}" nil t) (replace-match (nth 0 meta) t t))
                      (goto-char (point-min))
                      (while (search-forward "{{{date}}}" nil t) (replace-match (nth 1 meta) t t))
+                     (goto-char (point-min))
+                     (while (search-forward "{{{desc}}}" nil t) (replace-match (nth 3 meta) t t))
                      (goto-char (point-min))
                      (while (search-forward "{{{filename}}}" nil t) (replace-match (nth 2 meta) t t))
                      (buffer-string))))
