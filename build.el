@@ -4,10 +4,11 @@
 (package-initialize)
 (unless (package-installed-p 'htmlize)
   (package-refresh-contents)
-  (package-install 'htmlize)
-  (package-install 'idris-mode))
+  (package-install 'htmlize))
+(add-to-list 'load-path "./idris2-mode/")
 (require 'ox-publish)
 (require 'htmlize)
+(require 'idris2-mode)
 
 (setq org-html-htmlize-output-type 'css)
 (setq org-html-htmlize-font-prefix "org-src-")
