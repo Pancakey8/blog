@@ -1,0 +1,495 @@
+#+INCLUDE: .post-header.org
+
+#+TITLE: The One Concept of Idris
+#+AUTHOR: Pancake
+#+DATE: 2026-05-12
+#+DESCRIPTION: By inspecting three examples, we explore the applications of Idris's expansive type system.
+
+Idris is a functional programming language with a strong type system
+based on /Quantitative Type Theory/. Notable features of the system are:
+ - Types as first-class features
+ - Connections between Types and Usage
+ - Types dependent on values (Dependent types)
+
+Today, we will explore how this system can improve safety and provide
+comfortable interfaces by looking at three examples.
+
+** Text Formatting, Safely
+
+A classic text formatter is the C ~printf~. This function uses type
+annotated strings such as ~%d~ and ~%s~ to describe expected values,
+but type safety is generally not enforced.
+
+In contrast, Idris allows types to be manipulated as first-class
+objects, allowing for the construction of a function with a matching
+signature for a given format string.
+
+The first step is to parse the format string into the type system.
+
+#+NAME: example-01-encoding
+#+BEGIN_SRC idris
+data Format = Number Format
+            | Str Format
+            | Lit String Format
+            | End
+
+parseFormat : List Char -> Format
+parseFormat [] = End
+parseFormat ('%' :: 'd' :: rest) = Number (parseFormat rest)
+parseFormat ('%' :: 's' :: rest) = Str (parseFormat rest)
+parseFormat (c :: rest) =
+  case parseFormat rest of
+    Lit s fmt => Lit (strCons c s) fmt
+    fmt => Lit (strCons c "") fmt
+#+END_SRC
+
+#+BEGIN_SRC idris
+-- REPL:
+λΠ> parseFormat (unpack "Hello, %s. Your lucky number is %d.")
+Lit "Hello, " (Str (Lit ". Your lucky number is " (Number (Lit "." End))))
+-- Visualise as:
+Lit("Hello, ") => Str => Lit(". Your lucky number is ") => Number => Lit(".") => End
+#+END_SRC
+
+The format is traversed to construct a function signature
+
+#+NAME: example-01-function-type
+#+BEGIN_SRC idris
+Formatter : Format -> Type
+Formatter (Number f) = Int -> Formatter f
+Formatter (Str f) = String -> Formatter f
+Formatter (Lit _ f) = Formatter f
+Formatter End = String
+#+END_SRC
+
+#+BEGIN_SRC idris
+λΠ> Formatter (parseFormat (unpack "Hello, %s. Your lucky number is %d."))
+String -> Int -> String
+#+END_SRC
+
+Then the fitting implementation is constructed.
+
+#+NAME: example-01-final
+#+BEGIN_SRC idris
+makeFormatter : (fmt : Format) -> String -> Formatter fmt
+makeFormatter (Number fmt) str = \i => makeFormatter fmt (str ++ show i)
+makeFormatter (Str fmt) str = \s => makeFormatter fmt (str ++ s)
+makeFormatter (Lit l fmt) str = makeFormatter fmt (str ++ l)
+makeFormatter End str = str
+
+format : (fmt : String) -> Formatter (parseFormat (unpack fmt))
+format fmt = makeFormatter _ ""
+#+END_SRC
+
+#+BEGIN_SRC idris
+λΠ> :t format "Hello, %s. Your lucky number is %d."
+format (fromString "Hello, %s. Your lucky number is %d.") : String -> Int -> String
+λΠ> format "Hello, %s. Your lucky number is %d." "Pancake" 10
+"Hello, Pancake. Your lucky number is 10."
+#+END_SRC
+
+Altogether, we have constructed a ~printf~-like interface with strict
+type safety. In Idris, types are everything, and our next example will
+delve deeper into the type system.
+
+#+BEGIN_SRC idris :tangle idris-concept-01.idr :noweb yes :exports none
+<<example-01-encoding>>
+<<example-01-function-type>>
+<<example-01-final>>
+#+END_SRC
+
+** Reforming Dynamic Arrays
+
+Languages are faced with the silliest of problems: dynamic code.
+While most languages can analyse your code if you use static arrays,
+they are blind to any invariants relating to dynamic structures.
+
+*** A Unique Representation
+
+In most languages, one pattern we notice is that a static array
+contains length information at a type level (C++: ~std::array<int, 10>~)
+whereas a dynamic array doesn't (C++: ~std::vector<int>~). It is this
+discrepancy that makes static structures safer in most languages.
+
+However, in Idris, dependent types are a first class notion, and thus we may
+construct the equivalent of a ~std::vector<int, current_length>~, or
+in Idris notation, ~DynArray currentLength~.
+
+#+NAME: example-02-core-type
+#+BEGIN_SRC idris
+data DynArray : Nat -> Type where
+  MkDynArr : {len : Nat} -> 
+             (cap : Nat) -> 
+             (buf : Buffer) -> 
+             DynArray len
+#+END_SRC
+
+Now of course, declarations only get one type, and types are
+static. Since a ~x : DynArray 3~ can't be mutated in-place into
+a ~x : DynArray 4~, functions like ~push~ will instead use
+/linear typing/.
+
+A /linear type/ in Idris is denoted with ~1 x : T~, meaning ~x~ must
+be used exactly once in the code.
+
+Below, linear types are used to consume old references to the array,
+ensuring only the latest length info remains.
+
+#+NAME: example-02-basic-functions
+#+BEGIN_SRC idris
+-- Implementations are pretty standard
+newArray : L1 IO (DynArray 0)
+setLength : (len' : Nat) -> (1 _ : DynArray len) -> L1 IO (DynArray len')
+push : {len : Nat} -> Int -> (1 _ : DynArray len) -> L1 IO (DynArray (S len))
+printArray : {len : Nat} -> (1 _ : DynArray len) -> L1 IO (DynArray len)
+endArray : (1 _ : DynArray len) -> L1 IO ()
+#+END_SRC
+
+#+NAME: example-02-eval1
+#+BEGIN_SRC idris
+example1 : IO ()
+example1 = run $ do
+  arr <- newArray
+  arr <- push 1 arr
+  arr <- push 2 arr
+  arr <- push 3 arr
+  arr <- printArray arr
+  endArray arr
+  pure ()
+#+END_SRC
+
+#+BEGIN_SRC
+[1, 2, 3]
+#+END_SRC
+
+The notion of a type being /linear/ makes more sense if we decompose /do/ notation (procedural syntax) into pipes
+
+#+BEGIN_SRC idris
+λΠ> :exec run (newArray >>= push 1 >>= push 2 >>= push 3 >>= printArray >>= endArray >> pure ())
+[1, 2, 3]
+#+END_SRC
+
+Bluntly speaking, a type is linear if the main method of consumption
+are a chain of pipes, even if the underlying data isn't copied (here,
+dynamic arrays are mutated in place).
+
+*** Safety? No Problem
+
+Upping the heat, we may try to think about how ~push~ & ~printArray~
+are implemented. We must be reading from and writing to the data at
+some point. This means that we use /indices/ to access the array,
+which is the one of the common occurences of off-by-one errors.
+
+Idris solves invalid access through the notion of a ~Fin n~. The type
+~Fin n~ represents numbers ~0~ through ~n - 1~, exactly fitting array
+indices.
+
+#+NAME: example-02-accessors
+#+BEGIN_SRC idris
+elemAt : {len : Nat} -> Fin len -> (1 _ : DynArray len) -> L1 IO (Int, (DynArray len))
+setAt : {len : Nat} -> Fin len -> Int -> (1 _ : DynArray len) -> L1 IO (DynArray len)
+#+END_SRC
+
+This is the first point in the implementation where Idris strays from
+every other language. In most languages, the access functions of a
+dynamic array do a runtime assertion of the index. In Idris, the type
+guarantees that the access is safe, meaning the underlying
+implementation can bypass the safety checks entirely.
+
+#+BEGIN_SRC idris
+λΠ> :t (newArray >>= push 1 >>= push 2 >>= elemAt 0)
+((newArray >>= push 1) >>= push 2) >>= elemAt (natToFinLT 0) : L IO (Int, DynArray 2)
+λΠ> :t (newArray >>= push 1 >>= push 2 >>= elemAt 3)
+Error: Can't find an implementation for So (with block in integerLessThanNat 3 False 2).
+
+(Interactive):1:47--1:48
+ 1 | :t (newArray >>= push 1 >>= push 2 >>= elemAt 3)
+                                                   ^
+#+END_SRC
+
+The error above comes from the /type checker/ and not the
+runtime. Whilst ~0~ trivially proves ~0 < 2~, the number ~3~ trivially
+fails it. This ensures that safety is covered in Idris code.
+
+For dynamic sizes, however, some cracks start to form. If we take user
+input, we don't know what our elements are. How will we track the
+length of our array then?
+
+*** The Dynamic in the Static
+
+Consider the function below. It converts a ~Vect~, which is a linked
+list type dependent on the length, into our ~DynArray~. It works well
+as a constructor for when we have /static data/ that we want to form
+an array with.
+
+#+NAME: example-02-fromVect
+#+BEGIN_SRC idris
+fromVect : {len : Nat} -> Vect len Int -> L1 IO (DynArray len)
+fromVect {len} ns = do
+  arr <- newArray
+  arr <- setLength len arr
+  fillWith ns (allFins len) arr
+  where
+    fillWith : {len : Nat} ->
+               Vect len' Int ->
+               Vect len' (Fin len) ->
+               (1 _ : DynArray len) ->
+               L1 IO (DynArray len)
+    fillWith [] [] arr = pure1 arr
+    fillWith (n :: ns) (i :: is) arr = do
+      arr <- setAt i n arr
+      fillWith ns is arr
+#+END_SRC
+
+#+BEGIN_SRC idris
+λΠ> :exec run (fromVect [1, 2, 3] >>= printArray >>= endArray >> pure ())
+[1, 2, 3]
+#+END_SRC
+
+However, the example fails if we want to work with dynamic data, for
+example user input.  For this reason, there are a few notions that
+Idris applies. The first notion is dependencies on runtime values.
+
+#+NAME: example-02-fromList
+#+BEGIN_SRC idris
+-- This is from the Idris standard library:
+-- Data.Vect.fromList : (xs : List elem) -> Vect (length xs) elem
+-- Use it here:
+fromList : (ns : List Int) -> L1 IO (DynArray (length ns))
+fromList ns = fromVect (fromList ns)
+#+END_SRC
+
+#+NAME: example-02-eval2
+#+BEGIN_SRC idris
+example2 : IO ()
+example2 = run $ do
+  putStr "Input: "
+  input <- getLine
+  let nums = mapMaybe parseInteger (words input)
+  arr <- Main.fromList nums
+  arr <- printArray arr
+  endArray arr
+  pure ()
+#+END_SRC
+
+ # Version below is for fromList2 below
+ # Placed here for easier maintenance
+#+NAME: example-02-eval2'
+#+BEGIN_SRC idris :noweb yes :exports none
+example2' : IO ()
+example2' = run $ do
+  putStr "Input: "
+  input <- getLine
+  let nums = mapMaybe parseInteger (words input)
+  _ # arr <- Main.fromList2 nums
+  arr <- printArray arr
+  endArray arr
+  pure ()
+#+END_SRC
+
+#+BEGIN_SRC
+Input: 3 6 1 7 8
+[3, 6, 1, 7, 8]
+#+END_SRC
+
+Another solution are so-called /Sigma Types/ or /Dependent Pair/. It
+is a type where you pair a value alongside a type that depends on it,
+like below:
+
+#+NAME: example-02-fromList2
+#+BEGIN_SRC idris
+fromList2 : (ns : List Int) -> L1 IO (Res Nat DynArray)
+fromList2 ns = do
+  1 arr <- newArray
+  construct ns arr
+  where
+    construct : {len : Nat} -> List Int -> (1 _ : DynArray len) -> L1 IO (Res Nat DynArray)
+    construct [] arr = pure1 (_ # arr)
+    construct (n :: ns) arr = do
+      arr <- push n arr
+      construct ns arr
+#+END_SRC
+
+In this version, ~Res Nat DynArray~ is a tuple s.t. if the first
+component is ~len : Nat~, then the second is an array ~arr : DynArray len~.
+This variant also computes a ~DynArray~ without directly knowing
+the final length. Note that, all we need to know is that ~push~ increments
+the length, and thatthe final result has /some/ length. It should be noted
+that the first version proves /more/ about code, since it directly states
+what the final length is expected to be. Both situations have their uses, of course.
+
+To sum up this section, dynamic arrays have shown us that dependent
+typing and proofs don't have to lock us into static, /mathematical/
+code. On the contrary, stronger types aid in writing better dynamic
+code by proving invariants. Now, let's finish off with a
+/tour de force/, using the Idris type system to prove safety in
+concurrency.
+
+#+BEGIN_SRC idris :tangle idris-concept-02.idr :noweb yes :exports none
+import Data.Buffer
+import Data.Fin
+import Data.List
+import Data.Vect
+import Control.Linear.LIO
+import Data.List
+import Data.String
+
+<<example-02-core-type>>
+<<example-02-basic-functions>>
+<<example-02-accessors>>
+
+elemAt i (MkDynArr cap buf) = do
+  i <- getInt64 buf (8 * (cast (finToNat i)))
+  pure1 (cast i, MkDynArr cap buf)
+
+setAt i elem (MkDynArr cap buf) = setInt64 buf (8 * cast (finToNat i)) (cast elem) >> pure1 (MkDynArr cap buf)
+
+newArray =
+  newBuffer (4 * 8) >>=
+    \case
+      Just buf => pure1 (MkDynArr 4 buf)
+      Nothing => assert_total (idris_crash "Out of memory")
+
+setLength len' (MkDynArr cap buf) =
+  if len' < cap
+  then pure1 (MkDynArr cap buf)
+  else do
+    let cap' = max (2 * cap) len'
+    resizeBuffer buf (cast (8 * cap')) >>=
+      \case
+        Just buf => pure1 (MkDynArr cap' buf)
+        Nothing => assert_total (idris_crash "Out of memory")
+
+push {len} elem arr = setLength (S len) arr >>= setAt last elem
+
+printArray {len = Z} (MkDynArr cap buf) = putStrLn "[]" >> pure1 (MkDynArr cap buf)
+printArray {len = S k} (MkDynArr cap buf) = do
+    let 1 arr = MkDynArr {len = S k} cap buf
+    (start, arr) <- elemAt 0 arr 
+    putStr ("[" ++ show start)
+    arr <- printRest (tail $ allFins $ S k) arr
+    putStrLn "]"
+    pure1 arr
+  where
+    printRest : List (Fin (S k)) -> (1 _ : DynArray (S k)) -> L1 IO (DynArray (S k))
+    printRest [] arr = pure1 arr
+    printRest (i :: is) arr = do
+      (elem, arr) <- elemAt i arr
+      putStr (", " ++ show elem)
+      printRest is arr
+
+endArray (MkDynArr _ _) = pure1 ()
+
+<<example-02-eval1>>
+
+<<example-02-fromVect>>
+<<example-02-fromList>>
+<<example-02-fromList2>>
+<<example-02-eval2>>
+<<example-02-eval2'>>
+#+END_SRC
+
+** Dancing Thread
+
+As with Go and a few other modern languages, Idris can use Channels
+for thread-to-thread communication. Idris channels have something
+special, however: Sessions.
+
+A ~Session~ is a type that encodes the order of operations on a
+channel. For example, a ~Channel (Send (Recv End))~ can only go
+through one ~send~ and then one ~recv~ before it must be closed.
+
+Maybe you see where this is going by now. The ~Session~ types can have
+a ~Dual~. The ~Dual~ of a session flips the order of operations, so
+the ~Dual~ for the Session given prior is ~Recv (Send End)~. The use
+of a ~Session~ on one end of the channel, and ~Dual Session~ on the
+other, guarantees that a deadlock (triggered by a ~recv~ operation on
+both sides) won't occur.
+
+In the example below, a ~client~ feeds numbers through one end of the
+channel. A ~server~ accumulates the numbers it reads and feeds out the
+intermediary sums. The ~client~ prints these sums.
+
+#+NAME: example-03-full
+#+BEGIN_SRC idris
+ServerLoop : Nat -> Session
+ServerLoop 0 = End
+ServerLoop (S n) = Recv Int (Send Int (ServerLoop n))
+
+server : {n : Nat} -> Int -> (1 ch : Channel (ServerLoop n)) -> L IO ()
+server {n=0} acc ch = end ch >> pure ()
+server {n=S n} acc ch = do
+  (val # ch) <- recv ch
+  let acc' = acc + val
+  ch <- send ch acc'
+  server acc' ch
+
+client : {n : Nat} -> Vect n Int -> (1 ch : Channel (Dual (ServerLoop n))) -> L IO ()
+client [] ch = do
+  putStrLn "Finished"
+  end ch
+  pure ()
+client (x :: xs) ch = do
+  ch <- send ch x
+  (acc # ch) <- recv ch
+  putStrLn ("Total = " ++ show acc)
+  client xs ch
+
+example3 : IO ()
+example3 = run $ do
+  _ <- fork _ (server {n=4} 0) (client [5, 10, 15, 20])
+  pure ()
+#+END_SRC
+
+#+BEGIN_SRC
+Total = 5
+Total = 15
+Total = 30
+Total = 50
+Finished
+#+END_SRC
+
+Here, our Session is ~ServerLoop n~. For any number of elements that
+must be traded across the two threads, ~ServerLoop n~ gives the order
+of operations from the ~server~ perspective.
+
+The four-element case is illustrated below:
+
+#+BEGIN_SRC idris
+λΠ> ServerLoop 4
+Recv Int (Send Int (Recv Int (Send Int (Recv Int (Send Int (Recv Int (Send Int End)))))))
+λΠ> Dual (ServerLoop 4)
+Send Int (Recv Int (Send Int (Recv Int (Send Int (Recv Int (Send Int (Recv Int End)))))))
+#+END_SRC
+
+Then, ~fork~ summons the client and server on dual sessions.
+#+BEGIN_SRC idris
+System.Concurrency.Session.fork : (0 s : Session) -> (Channel s -@ L IO a) -@ ((Channel (Dual s) -@ L IO b) -@ L IO (a, b))
+#+END_SRC
+(Note that ~a -@ b~ is the same as ~(1 _ : a) -> b~).
+
+By ensuring that threads will move in unison at the fork point, we
+don't need to even consider that they will fall out of sync or
+deadlock once we're inside the thread code.
+
+#+BEGIN_SRC idris :tangle idris-concept-03.idr :noweb yes :exports none
+import Data.Vect
+import Control.Linear.LIO
+import System.Concurrency.Session
+
+<<example-03-full>>
+#+END_SRC
+
+** Conclusion
+
+In this post, we covered Idris's exquisite type system. Though many
+would write off such a system as /too theoretical/ to be applied
+anywhere, we can see that it has a lot of practical uses.
+
+On a personal note, I am in love with this system. I have been a fan
+of Haskell for a long time, but the language has let me down many
+times with the rough edges of its syntax, the lazy evaluation,
+performance penalties, and so on. Idris is a breath of fresh air,
+because it smoothens most of the rough edges of Haskell, allows for
+amazing FFI, feels much more lightweight, and also adds a killer type
+system.

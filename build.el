@@ -4,7 +4,8 @@
 (package-initialize)
 (unless (package-installed-p 'htmlize)
   (package-refresh-contents)
-  (package-install 'htmlize))
+  (package-install 'htmlize)
+  (package-install 'idris-mode))
 (require 'ox-publish)
 (require 'htmlize)
 
