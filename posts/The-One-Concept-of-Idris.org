@@ -2,7 +2,7 @@
 
 #+TITLE: The One Concept of Idris
 #+AUTHOR: Pancake
-#+DATE: 2026-05-12
+#+DATE: 2026-06-06
 #+DESCRIPTION: By inspecting three examples, we explore the applications of Idris's expansive type system.
 
 Idris is a functional programming language with a strong type system
@@ -314,7 +314,7 @@ In this version, ~Res Nat DynArray~ is a tuple s.t. if the first
 component is ~len : Nat~, then the second is an array ~arr : DynArray len~.
 This variant also computes a ~DynArray~ without directly knowing
 the final length. Note that, all we need to know is that ~push~ increments
-the length, and thatthe final result has /some/ length. It should be noted
+the length, and that the final result has /some/ length. It should be noted
 that the first version proves /more/ about code, since it directly states
 what the final length is expected to be. Both situations have their uses, of course.
 
@@ -403,8 +403,7 @@ Maybe you see where this is going by now. The ~Session~ types can have
 a ~Dual~. The ~Dual~ of a session flips the order of operations, so
 the ~Dual~ for the Session given prior is ~Recv (Send End)~. The use
 of a ~Session~ on one end of the channel, and ~Dual Session~ on the
-other, guarantees that a deadlock (triggered by a ~recv~ operation on
-both sides) won't occur.
+other, ensures that the threads move in harmony.
 
 In the example below, a ~client~ feeds numbers through one end of the
 channel. A ~server~ accumulates the numbers it reads and feeds out the

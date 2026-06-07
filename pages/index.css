@@ -25,17 +25,27 @@ li {
     width: 50%;
     height: 100%;
     margin: auto;
-    display: flex;
-    flex-flow: column;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: 1fr;
+    grid-column-gap: 0px;
+    grid-row-gap: 0px; 
     border-inline: 3px solid #dadada;
     padding-left: 2%;
     padding-right: 2%;
 }
 
 #links {
+    grid-area: 1 / 2 / 2 / 3;
     margin: 0;
     padding: 0;
     list-style: none;
+}
+
+#left-column {
+    display: flex;
+    flex-flow: column;
+    gap: 2%;
 }
 
 .link-name {
@@ -52,3 +62,8 @@ li {
     margin: 0;
     padding: 0 1em;
 }
+
+#projects > table {
+    border-spacing: 20px;
+}
+
