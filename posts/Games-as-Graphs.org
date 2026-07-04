@@ -1,11 +1,9 @@
 #+INCLUDE: .post-header.org
-#+LATEX_HEADER: \usepackage{tikz}
-#+LATEX_HEADER: \usetikzlibrary{positioning, arrows.meta, fit}
 
 #+TITLE: Games as Graphs: A Spider's Approach
 #+AUTHOR: Pancake
 #+DATE: 2026-07-04
-#+DESCRIPTION: TODO
+#+DESCRIPTION: We formulate games as a graph, approaching from an unusual angle.
 
 To the naked eye, a spider's web appears weak. It seems impossible for
 a few strands of silk, each individually fragile, to hold up against
@@ -97,9 +95,9 @@ literal representation of our graph. A Ball is an object, it enters a
 Physics method simulating gravity and collision forces, and a Response
 method then finalizes any remaining action before returning back.
 
-However, generalising from a literal representation requires
-abstracting objects. For example, adding a separate Triangle object
-beside Balls requires that we abstract a RigidBody for the Physics
+However, generalising from concrete objects requires abstraction and
+superclassing. For example, adding a separate Triangle object beside
+Balls requires that we abstract a RigidBody for the Physics
 system. This is fine for finished projects, but for evolving
 prototypes, abstracting objects through development cycles introduces
 additional mental overhead. A better approach would be to break large
@@ -126,39 +124,37 @@ archetypes to group data that is often used together into large
 tables, meaning the Physics system has local, cache-friendly access to
 all the data it needs.
 
-Though ECS is great at expressing data extensibly, part of our
-locality argument falls apart when we look at interactions. Note that
-any change to Physics affects all instances of the Archetype, and all
-dependencies on the output. In the case of our demo, Physics impacts 4
-of 7 nodes directly. The main problem isn't about the scale of the
-impact, however, its about the action at a distance. Of course,
-modifying a generalised Physics system affects a lot of other pieces,
-but this also happens implicitly. There is nothing about our Balls or
-Surfaces that tells a story of how they interact with the Physics
-system.
-
-Let us now explore an approach that attempts to alleviate this
-problem.
+Even if ECS is a success story on data, it loses constructive power on
+interactions. In the next section, we will explore another
+architecture that highlights interactions.
 
 ** Actions and Reactions
 
-So far, our approach of graphs have proven successful at display data
-dependencies. However, we have lost crucial information about the
-exact flow of actions in our system. In this section, we will be
-approaching graph, again, but with the actions and reactions as
-first-class objects.
+So far, our approach of dataflow graphs have proven successful at
+displaying data dependencies. However, we have lost crucial
+information about the exact flow of actions in our system. Moreover,
+in a complex game with networking, enemy AI, complex physics, save
+systems, and more, it's easy to lose track of the exact procedures or
+event triggers that modify data. For most complex games, ECS systems
+often rely on an observer pattern, like an event bus system, that
+listen for specific triggers. However, because the events live outside
+the ECS system, the relation between triggers and systems are
+obscured. Thus, in this section, we place events at the heart of our
+architecture, constructing a new graph whose edges represent the flow
+of actions rather than the flow of data.
 
-Let us revisit the game.
+Let us revisit the game,
 
 #+INCLUDE: ".game-graph-demo.html" export html
 
 This time, we will avoid dividing the game into systems and state. In
 fact, we will omit state entirely for now, and assume all necessary
 state is global. What we will do for our construction is to focus on
-transformations. Each transformation will be an arrow between two
-events. On the tail side, it will consume an event as a trigger. The
-arrow will act on the state, mutating it. Then, it will emit a new
-event of its own. In isolation, the arrows will look as below,
+transformations. Each transformation will be represented as a a
+directional arrow between two events. On the tail side, it will
+consume an event as a trigger. The arrow will act on the global state,
+mutating it. Then, it will emit a new event of its own. In isolation,
+the directed arrows will look as below,
 
 #+begin_src dot :file games-as-graphs-arrow.svg :exports results
   digraph G {
@@ -185,8 +181,12 @@ event of its own. In isolation, the arrows will look as below,
 #+RESULTS:
 [[file:games-as-graphs-arrow.svg]]
 
-Later on, we will analyze more of the individual arrows, but for now,
-let us observe how the game looks under the event perspective.
+Later on, we will analyze more of the individual properties of these
+arrows. For now, lets turn our attention to the full game graph. Since
+the graph is made of these arrows, each directed arrow you see is a
+transformation, though the names of the transformations are omitted to
+avoid clutter. Previously, the nodes were state and systems, this time
+each node represents an event.
 
 #+begin_src dot :file games-as-graphs-fsm-2.svg :exports results
   digraph G {
@@ -224,4 +224,349 @@ let us observe how the game looks under the event perspective.
 #+RESULTS:
 [[file:games-as-graphs-fsm-2.svg]]
 
-TODO
+Compared to the previous section, the new graph clarifies the system's
+control flow better. For instance, the Physics section now shows a
+distinct branch where the process skips physics entirely if a specific
+task list is non-empty. Similarly, Input is broken down into
+individual mouse events.
+
+Remarkably, the new system is not dependent on time, update cycles, or
+any specific procedure. The system is purely declarative, only
+declaring the types of inputs it takes and reacts to. In contrast, an
+ECS would be proactive, an ~Update()~ is called on repeat and the
+various systems check for applicable data and events.
+
+Representing the graph of events is only half of our troubles. In ECS,
+the graph was formulated naturally by defining systems and
+components. In the new model, however, we lack the primitives to
+construct a graph from smaller pieces. In the next section, we will
+revisit the building blocks of our graph to create a system of
+composition.
+
+** Spider's Weave
+
+To build up the larger algebra of our system, we need to start
+small. Just like the spider, we will only start with a single strand,
+a single arrow,
+
+file:games-as-graphs-arrow.svg
+
+From now on, ~Trigger -f> Emission~ denotes the arrow that's seen
+above. We will now define four operations, each of which will bridge
+some gap in our system. Collectively, these four operations will be
+able to formulate the full game graph, without losing the isolation of
+individual arrows. We can think of these four operations as an algebra
+of arrows, defining the rules that arrows follow, and the capabilities
+of arrows.
+
+To start, our first operation considers two arrows ~a -f> b~ and
+~c -g> d~. These arrows don't have any relation to one another.
+Given two independent arrows like this, we can use the first operation
+to lay the two arrows in parallel, so that they don't interfere.
+
+#+begin_src dot :file games-as-graphs-arrow-parallel.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
+  	edge [arrowhead=vee, minlen=2];
+
+  	c; d; a; b;
+  	
+  	a -> b [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>f(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+
+  	c -> d [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>g(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-arrow-parallel.svg]]
+
+In the context of the game demo, each of the external inputs such as
+~LeftClick~, ~RightClick~, ~GameTick~, are stood parallel, as they are
+orthogonal actions. This demonstrates the use of the first operation
+as a means of append completely new lines of logic to the system.
+
+The second operation will consider arrows ~a -f> b~ and ~b -g> c~,
+where one arrow's emission matches the other's trigger. In such cases,
+we can sequence the arrows one after the other.
+
+#+begin_src dot :file games-as-graphs-arrow-sequenced.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
+  	edge [arrowhead=vee, minlen=2];
+
+  	a -> b [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>f(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+
+  	b -> c [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>g(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-arrow-sequenced.svg]]
+
+Turning to the game demo again, sequencing appears in chain reactions
+like the one from ~GameTick~ to ~PhysicsTrigger~, and finally to
+~PhysicsResult~. The second operation then allows for small, isolated
+pieces of logic to combine into long chains of operations.
+
+There is now enough vocabulary to represent linear flows. The last two
+operations will then focus on branching control flow.
+
+The third operation handles the creation of branches. Given ~a -f> b~
+and ~a -g> c~, the operation branches a single input of ~a~ into both
+paths. This branching action is called a /fan-out/.
+
+#+begin_src dot :file games-as-graphs-arrow-fanout.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
+  	edge [arrowhead=vee, minlen=2];
+
+  	a -> b [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>f(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+
+  	a -> c [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>g(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-arrow-fanout.svg]]
+
+Though represented in individual pieces for clarity in the game graph,
+the mouse button events actually unify under an ~Event~, which we fan
+out to various handlers like ball spawning and surface creation.
+
+For the final operation, we will undo our fanout by joining
+branches. With arrows ~a -f> c~ and ~b -g> c~, since both output a
+~c~, we join them at the output so that either one of ~a~ or ~b~ can
+trigger a ~c~. The joining action is called a /fan-in/.
+
+#+begin_src dot :file games-as-graphs-arrow-fanin.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
+  	edge [arrowhead=vee, minlen=2];
+
+  	a -> c [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>f(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+
+  	b -> c [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>g(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-arrow-fanin.svg]]
+
+In the game, all operations fan into a single exit event. Similarly,
+each one of ~RightClick~, ~RightHold~, and ~RightRelease~ fan into a
+~DrawSurf~ event.
+
+With the four operations complete, let's revisit the game one final
+time, and carve up the graph into each individual arrow we can find.
+
+#+begin_src dot :file games-as-graphs-fsm-2-indv.svg :exports results
+  digraph G {
+  	rankdir=TD
+  	edge [arrowhead=vee, minlen=2]
+  	
+  	node [fontname="sans-serif", shape=rectangle, penwidth=0]
+  	decidePhysics [label="decidePhysics"]
+  	applyPhysics [label="applyPhysics"]
+  	updateGame [label="updateGame"]
+  	spawnBall [label="spawnBall"]
+  	startDraw [label="startDraw"]
+  	updateDraw [label="updateDraw"]
+  	finaliseDraw [label="finaliseDraw"]
+  	spawnSurfOrWait [label="spawnSurfOrWait"]
+
+  	node [shape=point]
+  	X; X2; X3; X4;
+
+  	node [shape=circle, penwidth=1.0, fixedSize=true, width=1.2]
+
+  	GameTick -> decidePhysics [arrowhead=none, color=red]
+  	decidePhysics -> PhysicsTrigger [color=red]
+  	decidePhysics -> X [color=red]
+
+  	PhysicsTrigger2 [label="PhysicsTrigger"]
+  	PhysicsTrigger2 -> applyPhysics [arrowhead=none, color=green]
+  	applyPhysics -> PhysicsResult [color = green]
+
+  	PhysicsResult2 [label="PhysicsResult"]
+  	PhysicsResult2 -> updateGame [arrowhead=none, color=blue]
+  	updateGame -> X2 [color=blue]
+
+  	LeftClick -> spawnBall [arrowhead=none, color=orange]
+  	spawnBall -> X3 [color=orange]
+
+  	RightClick -> startDraw [arrowhead=none, color=purple]
+  	startDraw -> DrawSurf [color=purple]
+
+  	DrawSurf2 [label="DrawSurf"]
+  	RightHold -> updateDraw [arrowhead=none, color=cyan]
+  	updateDraw -> DrawSurf2 [color=cyan]
+
+  	DrawSurf3 [label="DrawSurf"]
+  	RightRelease -> finaliseDraw [arrowhead=none, color=yellow]
+  	finaliseDraw -> DrawSurf3 [color=yellow]
+
+  	DrawSurf4 [label="DrawSurf"]
+  	DrawSurf4 -> spawnSurfOrWait [arrowhead=none, color=lime]
+  	spawnSurfOrWait -> X4 [color=lime]
+  }
+
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-fsm-2-indv.svg]]
+
+#+begin_src dot :file games-as-graphs-fsm-2-hl.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	edge [arrowhead=vee, minlen=2];
+
+  	X [shape=point];
+  	
+  	node [fontname="sans-serif", shape=rectangle, penwidth=0];
+  	triggerCond[label="if tasks.empty()"];
+  	triggerElse[label="else"];
+  	triggerBranch[label="", width=0];
+
+  	node [shape=circle, penwidth=1.0];
+  	GameTick -> triggerBranch [arrowhead=none, color=red];
+  	triggerBranch -> triggerCond [arrowhead=none, color=red]
+  	triggerCond -> PhysicsTrigger [color=red];
+
+  	triggerBranch -> triggerElse [arrowhead=none, color=red];
+  	triggerElse -> X [color=red];
+
+  	PhysicsTrigger -> PhysicsResult [color=green];
+
+  	PhysicsResult -> X [color=blue];
+
+  	LeftClick -> X [color=orange];
+
+  	RightClick -> DrawSurf [color=purple];
+  	RightHold -> DrawSurf [color=cyan];
+  	RightRelease -> DrawSurf [color=yellow];
+  	DrawSurf -> X [color=lime];
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-fsm-2-hl.svg]]
+
+Some operations we can see in use here have already been mentioned,
+but with this new visual, we can see things more clearly. For example,
+there are three distinct arrows (purple, cyan, yellow) convering on a
+point (DrawSurf). We called this a /fan-in/ previously. Similarly, we
+see that red, green, blue is a sequence of three controllers. Red
+itself naturally contains a branching output, but this is due to its
+output being a variant (Either PhysicsTick or Exit), which is decided
+based on internal logic.
+
+** Conclusion & What's Next?
+
+Just as ECS is the modularisation of data, treating each arrow on the
+graph as a composable piece provides modularisation of event
+handlers. However, beside the modular perspective, the two approaches
+diverge quickly. While the ECS treats data as first class, our arrow
+system treats data as secondary. In fact, currently, all state is
+global. This is complete chaos, since accidental mutations can break
+the isolation of events. Similarly, while ECS has an answer for large
+operations (grouping similar data in tables for fast access), our
+event graphs are currently acyclic, meaning feedback loops and bulk
+actions can't be formulated. The absence of state isolation and
+looping tasks creates a huge barrier for game creation.
+
+To close up these holes in the architecture, the next two posts
+explore various concepts. The first post introduces a new concept that
+masks values we don't care about to prevent accidental mutation. The
+second post introduces a scheduler system that can handle large tasks
+like collision and pathfinding asynchronously.
+
+*Note:* The game's implementation can be found on [[https://github.com/Pancakey8/balls/tree/main][Github]] or
+ [[https://codeberg.org/Pancakey8/balls/src/branch/main][Codeberg]]. It is written in /Idris/, which is a functional
+ language. For readers foreign to functional code, searching
+ ~interface Arrow~ in ~src/Component.idr~ brings the type definitions
+ of the operations defined in this post, which should provide some
+ syntactic visual of how things look behind the scenes.
