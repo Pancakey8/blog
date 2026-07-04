@@ -124,37 +124,37 @@ archetypes to group data that is often used together into large
 tables, meaning the Physics system has local, cache-friendly access to
 all the data it needs.
 
-Even if ECS is a success story on data, it loses constructive power on
-interactions. In the next section, we will explore another
-architecture that highlights interactions.
+Even if ECS is a success story on data, it loses expressive power on
+interactions. Complex games may have a large range of systems like
+network connections, enemy AI, complicated physics, multi-stage game
+mechanics, and more. For a wide variety of systems, its often awkward
+to handle everything by pure state. Having flags and queues for
+asynchronous events quickly grows in complexity. Because of this, many
+games using ECS create an Event Bus system that allows for easier
+asynchronous processing. However, the Event Bus also obscures the true
+nature of incoming and outgoing events. In the next section, we will
+explore an approach that tries to alleviate this problem.
 
 ** Actions and Reactions
 
-So far, our approach of dataflow graphs have proven successful at
-displaying data dependencies. However, we have lost crucial
-information about the exact flow of actions in our system. Moreover,
-in a complex game with networking, enemy AI, complex physics, save
-systems, and more, it's easy to lose track of the exact procedures or
-event triggers that modify data. For most complex games, ECS systems
-often rely on an observer pattern, like an event bus system, that
-listen for specific triggers. However, because the events live outside
-the ECS system, the relation between triggers and systems are
-obscured. Thus, in this section, we place events at the heart of our
-architecture, constructing a new graph whose edges represent the flow
-of actions rather than the flow of data.
+ECS places data at the center of its narrative. This caused problems
+in asynchronous handling. Taking inspiration from the Event Bus, in
+this section, we place events at the heart of our architecture,
+constructing a new graph form whose edges represent the flow of
+actions rather than the flow of data.
 
 Let us revisit the game,
 
 #+INCLUDE: ".game-graph-demo.html" export html
 
-This time, we will avoid dividing the game into systems and state. In
-fact, we will omit state entirely for now, and assume all necessary
-state is global. What we will do for our construction is to focus on
-transformations. Each transformation will be represented as a a
-directional arrow between two events. On the tail side, it will
-consume an event as a trigger. The arrow will act on the global state,
-mutating it. Then, it will emit a new event of its own. In isolation,
-the directed arrows will look as below,
+This time, we will place events as the nodes of our graph. Then, each
+edge is a directed arrow that consumes one event as a trigger, and
+emits a new event. Internally, the arrow will mutate the necessary
+parts of state. There is some nuance to state handling covered on a
+followup post, so for now, we will assume all state is globally
+accessible to help with reasoning. The mutation will be represented as
+~f(state)~ on the edge, representing that the arrow internally calls
+~f~ which mutates ~state~.
 
 #+begin_src dot :file games-as-graphs-arrow.svg :exports results
   digraph G {
@@ -182,11 +182,10 @@ the directed arrows will look as below,
 [[file:games-as-graphs-arrow.svg]]
 
 Later on, we will analyze more of the individual properties of these
-arrows. For now, lets turn our attention to the full game graph. Since
-the graph is made of these arrows, each directed arrow you see is a
-transformation, though the names of the transformations are omitted to
-avoid clutter. Previously, the nodes were state and systems, this time
-each node represents an event.
+arrows. For now, lets turn our attention to the full game graph. For
+the full game graph, to avoid clutter, the names of the internal ~f~
+functions are hidden. We can still infer that /some/ operation happens
+on the state as we pass through each edge.
 
 #+begin_src dot :file games-as-graphs-fsm-2.svg :exports results
   digraph G {
@@ -236,28 +235,30 @@ declaring the types of inputs it takes and reacts to. In contrast, an
 ECS would be proactive, an ~Update()~ is called on repeat and the
 various systems check for applicable data and events.
 
-Representing the graph of events is only half of our troubles. In ECS,
-the graph was formulated naturally by defining systems and
-components. In the new model, however, we lack the primitives to
-construct a graph from smaller pieces. In the next section, we will
-revisit the building blocks of our graph to create a system of
-composition.
+The new system is no longer code that is graph-like, the new system
+/is/ the graph. The game graph /is/ also the implementation of the
+game. However, this insight is only half of our troubles, we also need
+a way to express the graph inside code, which is what we will explore
+in the next section.
 
 ** Spider's Weave
 
-To build up the larger algebra of our system, we need to start
-small. Just like the spider, we will only start with a single strand,
-a single arrow,
+ECS was extensible because it has a clear building block. Though our
+new approach implies a compositional approach to graphs, we've yet to
+formulate this. In the previous section, we had isolated a single
+arrow from a trigger to an event. In this section, we will use the
+individual arrow as a building block of the whole of the graph.
 
 file:games-as-graphs-arrow.svg
 
 From now on, ~Trigger -f> Emission~ denotes the arrow that's seen
-above. We will now define four operations, each of which will bridge
-some gap in our system. Collectively, these four operations will be
-able to formulate the full game graph, without losing the isolation of
-individual arrows. We can think of these four operations as an algebra
-of arrows, defining the rules that arrows follow, and the capabilities
-of arrows.
+above. We will use this text-based notation for inline explanations to
+avoid breaking up the train of thought with diagrams. Now, to
+construct graphs with the individual arrows, we need ways to join them
+together. There isn't a single, unified operation that covers all
+cases; instead, we will implement four operations, each defining a
+capability, a single face, of arrows. Altogether, the four operations
+will provide us the means to weave up a full web of events.
 
 To start, our first operation considers two arrows ~a -f> b~ and
 ~c -g> d~. These arrows don't have any relation to one another.
