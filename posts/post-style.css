@@ -77,3 +77,7 @@ li {
 .org-src-operator,    
 .org-src-idris-operator    { color: #821f72; }
 .org-src-warning           { color: #f6022c; text-decoration: underline; }
+
+.org-svg {
+    max-width: 100%;
+}

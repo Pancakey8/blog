@@ -11,9 +11,18 @@
 (require 'ox-publish)
 (require 'htmlize)
 (require 'idris-mode)
+(require 'ob-dot)
 
 (setq org-html-htmlize-output-type 'css)
 (setq org-html-htmlize-font-prefix "org-src-")
+
+(setq org-confirm-babel-evaluate
+      (lambda (lang body)
+        (not (string= lang "dot"))))
+
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((dot . t)))
 
 (defun my/get-org-file-metadata (file)
   "Extract title and date from an org file."
@@ -75,7 +84,7 @@
 
 	("blog-posts-resources"
 	 :base-directory "./posts/"
-	 :base-extension "css"
+	 :base-extension "css\\|svg"
 	 :publishing-directory "./dist/posts"
 	 :recursive t
 	 :publishing-function org-publish-attachment)

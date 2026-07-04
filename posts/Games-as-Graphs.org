@@ -1,0 +1,227 @@
+#+INCLUDE: .post-header.org
+#+LATEX_HEADER: \usepackage{tikz}
+#+LATEX_HEADER: \usetikzlibrary{positioning, arrows.meta, fit}
+
+#+TITLE: Games as Graphs: A Spider's Approach
+#+AUTHOR: Pancake
+#+DATE: 2026-07-04
+#+DESCRIPTION: TODO
+
+To the naked eye, a spider's web appears weak. It seems impossible for
+a few strands of silk, each individually fragile, to hold up against
+the real world; nevertheless, the web endures. Damage is localized,
+and problems are resolved within their frame, without collapsing the
+whole of the web.
+
+Game software shares a similar tension, preferring systems that are
+complex, delicate, and yet modular. A game isn't a monolith, its a
+network of interactions between rendering, physics, network, inputs,
+audio, and more. Each component continuously transforms others and
+itself. The challenge of building a game is to craft the system so
+that each piece is locally maintainable yet connected, dynamic yet
+resistant.
+
+In this post, we will explore an approach to game development inspired
+by the spider. Rather than prioritizing isolated systems, our focus
+will shift toward their composition, viewing the game as a graph of
+interacting parts.
+
+** Games as Data Machinery
+
+A game can be viewed as a data flow graph. In this model, we separate
+ourselves into systems and state. State can belong to the game, or it
+can come from outside sources. State consists of player position, item
+lists, terrain data, and others. Conversely, systems act on
+state. Systems don't care about the source of the state, but only how
+the data interacts. To illustrate, a physics system doesn't care about
+which objects are at play, it only consumes physics states to simulate
+collisions and physical forces.
+
+Let us take a look at a physics sandbox demo to better understand this
+model.
+
+#+INCLUDE: ".game-graph-demo.html" export html
+
+Breaking things down, we see that the game takes Inputs externally. It
+holds an internal state of Balls and Surfaces. Then, the game has
+interactions with Gravity, Physics, Physics Responses, and Spawners.
+
+We will now draw a graph that separated external state, internal
+state, and systems. State interacts with systems, and systems update
+state. We will use directional arrows to denote state entering system,
+and system updating state.
+
+#+begin_src dot :file games-as-graphs-fsm-1.svg :exports results
+  digraph G {
+      rankdir=LR;
+      node [shape=box, style="rounded", fontname="sans-serif"];
+      edge [arrowhead=vee, minlen=2];
+
+      Input[shape=circle];
+      subgraph cluster_state {
+          label = "State";
+          style = dashed;
+          color = black;
+          
+          Surfaces; Balls;
+      }
+
+      subgraph cluster_systems {
+          label = "Systems";
+          style = dashed;
+          color = black;
+  	node [shape=diamond, style="solid"]
+          
+          Gravity; Physics; Response; Spawner;
+          
+          Gravity -> Physics;
+          Physics -> Response;
+      }
+
+      Balls -> Physics;
+      Surfaces -> Physics;
+      Response -> Balls;
+
+      Input -> Spawner;
+      Spawner -> Balls;
+      Spawner -> Surfaces;
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-fsm-1.svg]]
+
+Dataflow is an intuitive representation of procedural approaches to
+games. Representing each node as its own unit of data provides a
+literal representation of our graph. A Ball is an object, it enters a
+Physics method simulating gravity and collision forces, and a Response
+method then finalizes any remaining action before returning back.
+
+However, generalising from a literal representation requires
+abstracting objects. For example, adding a separate Triangle object
+beside Balls requires that we abstract a RigidBody for the Physics
+system. This is fine for finished projects, but for evolving
+prototypes, abstracting objects through development cycles introduces
+additional mental overhead. A better approach would be to break large
+objects into the smallest sensible modules outright.
+
+To achieve the modulary, a common architecture is the use of Entity
+Component Systems (ECS). In this approach, Entities (concrete data)
+only carry links to their smaller Components. For example, a Ball is
+formed of Position, Velocity, and CollisionBody components. This model
+gives us natural Archetyping, where Components remain as pure data,
+and Systems assign groups of Components their meaning. Under the
+Physics system, the trio of Position, Velocity, and CollisionBody
+provide a RigidBody archetype. The system no longer cares about the
+larger object, instead it focuses on the units of data that it
+requires, and nothing more. A Triangle is then introduced under the
+same Archetype without influencing any existing instance of the
+Archetype, keeping any faults in Triangle handling local.
+
+There are also performance benefits to ECS. Instead of storing
+Component data on the Entities, each Entity is instead a collection of
+indices to the Component tables. Though the exact implementations
+vary, an approach is to make use of the previously mentioned
+archetypes to group data that is often used together into large
+tables, meaning the Physics system has local, cache-friendly access to
+all the data it needs.
+
+Though ECS is great at expressing data extensibly, part of our
+locality argument falls apart when we look at interactions. Note that
+any change to Physics affects all instances of the Archetype, and all
+dependencies on the output. In the case of our demo, Physics impacts 4
+of 7 nodes directly. The main problem isn't about the scale of the
+impact, however, its about the action at a distance. Of course,
+modifying a generalised Physics system affects a lot of other pieces,
+but this also happens implicitly. There is nothing about our Balls or
+Surfaces that tells a story of how they interact with the Physics
+system.
+
+Let us now explore an approach that attempts to alleviate this
+problem.
+
+** Actions and Reactions
+
+So far, our approach of graphs have proven successful at display data
+dependencies. However, we have lost crucial information about the
+exact flow of actions in our system. In this section, we will be
+approaching graph, again, but with the actions and reactions as
+first-class objects.
+
+Let us revisit the game.
+
+#+INCLUDE: ".game-graph-demo.html" export html
+
+This time, we will avoid dividing the game into systems and state. In
+fact, we will omit state entirely for now, and assume all necessary
+state is global. What we will do for our construction is to focus on
+transformations. Each transformation will be an arrow between two
+events. On the tail side, it will consume an event as a trigger. The
+arrow will act on the state, mutating it. Then, it will emit a new
+event of its own. In isolation, the arrows will look as below,
+
+#+begin_src dot :file games-as-graphs-arrow.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
+  	edge [arrowhead=vee, minlen=2];
+
+  	Trigger; Emission;
+
+  	Trigger -> Emission [
+  		labeldistance=4,
+  		labelangle=0,
+  		headlabel=<
+  			<table bgcolor="white" border="0">
+  			       <tr>
+  					<td>f(state)</td>
+  			       </tr>
+  			</table>
+  		>
+  	]
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-arrow.svg]]
+
+Later on, we will analyze more of the individual arrows, but for now,
+let us observe how the game looks under the event perspective.
+
+#+begin_src dot :file games-as-graphs-fsm-2.svg :exports results
+  digraph G {
+  	rankdir=LR;
+  	edge [arrowhead=vee, minlen=2];
+
+  	X [shape=point];
+  	
+  	node [fontname="sans-serif", shape=rectangle, penwidth=0];
+  	triggerCond[label="if tasks.empty()"];
+  	triggerElse[label="else"];
+  	triggerBranch[label="", width=0];
+
+  	node [shape=circle, penwidth=1.0];
+  	GameTick -> triggerBranch [arrowhead=none];
+  	triggerBranch -> triggerCond [arrowhead=none]
+  	triggerCond -> PhysicsTrigger;
+
+  	triggerBranch -> triggerElse [arrowhead=none];
+  	triggerElse -> X;
+
+  	PhysicsTrigger -> PhysicsResult;
+
+  	PhysicsResult -> X;
+
+  	LeftClick -> X;
+
+  	RightClick -> DrawSurf;
+  	RightHold -> DrawSurf;
+  	RightRelease -> DrawSurf;
+  	DrawSurf -> X;
+  }
+#+end_src
+
+#+RESULTS:
+[[file:games-as-graphs-fsm-2.svg]]
+
+TODO
