@@ -21,7 +21,7 @@ jobs:
       - name: Install Emacs
         run: |
           sudo apt-get update
-          sudo apt-get install -y emacs-nox
+          sudo apt-get install -y emacs-nox graphviz
 
       - name: Build Static Site
         run: emacs --batch -l build.el

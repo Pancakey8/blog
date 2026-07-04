@@ -4,6 +4,7 @@
 #+AUTHOR: Pancake
 #+DATE: 2026-07-04
 #+DESCRIPTION: We formulate games as a graph, approaching from an unusual angle.
+#+DRAFT: true
 
 To the naked eye, a spider's web appears weak. It seems impossible for
 a few strands of silk, each individually fragile, to hold up against

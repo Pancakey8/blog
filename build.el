@@ -31,8 +31,9 @@
     (let ((title (or (cadar (org-collect-keywords '("TITLE"))) "Untitled"))
           (date (or (cadar (org-collect-keywords '("DATE"))) ""))
 	  (desc (or (cadar (org-collect-keywords '("DESCRIPTION"))) ""))
-          (filename (file-name-base file)))
-      (list title date filename desc))))
+          (filename (file-name-base file))
+	  (draft (or (cadar (org-collect-keywords '("DRAFT"))) "false")))
+      (list title date filename desc draft))))
 
 (defun my/generate-homepage ()
   "Create HTML list items from org files and inject into index.html."
@@ -50,19 +51,20 @@
     ;; 2. Build the list of HTML items by reading metadata from each .org file
     (dolist (file post-files)
       (let* ((meta (my/get-org-file-metadata file))
-             (item (with-temp-buffer 
-                     (insert-file-contents template-file)
-                     (goto-char (point-min))
-                     ;; Replace our placeholders with actual data
-                     (while (search-forward "{{{title}}}" nil t) (replace-match (nth 0 meta) t t))
-                     (goto-char (point-min))
-                     (while (search-forward "{{{date}}}" nil t) (replace-match (nth 1 meta) t t))
-                     (goto-char (point-min))
-                     (while (search-forward "{{{desc}}}" nil t) (replace-match (nth 3 meta) t t))
-                     (goto-char (point-min))
-                     (while (search-forward "{{{filename}}}" nil t) (replace-match (nth 2 meta) t t))
-                     (buffer-string))))
-        (setq items-html (concat items-html item))))
+	     (is-draft (nth 4 meta)))
+        (unless (equal is-draft "true")
+	  (setq items-html (concat items-html (with-temp-buffer 
+						(insert-file-contents template-file)
+						(goto-char (point-min))
+						;; Replace our placeholders with actual data
+						(while (search-forward "{{{title}}}" nil t) (replace-match (nth 0 meta) t t))
+						(goto-char (point-min))
+						(while (search-forward "{{{date}}}" nil t) (replace-match (nth 1 meta) t t))
+						(goto-char (point-min))
+						(while (search-forward "{{{desc}}}" nil t) (replace-match (nth 3 meta) t t))
+						(goto-char (point-min))
+						(while (search-forward "{{{filename}}}" nil t) (replace-match (nth 2 meta) t t))
+						(buffer-string)))))))
 
     ;; 3. Read the main template, swap the {{{posts}}} tag, and write to dist/index.html
     (with-temp-file output-index
