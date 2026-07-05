@@ -1,574 +1,395 @@
 #+INCLUDE: .post-header.org
 
-#+TITLE: Games as Graphs: A Spider's Approach
+#+TITLE: Games as Event Graphs
 #+AUTHOR: Pancake
 #+DATE: 2026-07-04
-#+DESCRIPTION: We formulate games as a graph, approaching from an unusual angle.
+#+DESCRIPTION: We analyze an architecture that formulates games as a flow of events.
 #+DRAFT: true
 
-To the naked eye, a spider's web appears weak. It seems impossible for
-a few strands of silk, each individually fragile, to hold up against
-the real world; nevertheless, the web endures. Damage is localized,
-and problems are resolved within their frame, without collapsing the
-whole of the web.
+Traditional game architectures are typically built around an explicit
+execution loop. Each frame, a fixed sequence of actions occur. In this
+structure, game logic is expressed as functions that operate on stored
+state. Objects encapsulate data, and systems mutate them in response
+to time progression, often in ~Update()~ or ~Tick()~ cycles. This
+brings forth a system which behaves /proactively/: The program
+advances, and the world responds.
 
-Game software shares a similar tension, preferring systems that are
-complex, delicate, and yet modular. A game isn't a monolith, its a
-network of interactions between rendering, physics, network, inputs,
-audio, and more. Each component continuously transforms others and
-itself. The challenge of building a game is to craft the system so
-that each piece is locally maintainable yet connected, dynamic yet
-resistant.
+Today, we explore an alternative framing of games as networks of
+reactive transformations. Instead of organizing the game around a
+central cycle, we examine games in terms of how they listen for and
+propagate changes through structured interactions. This shift
+emphasises causality over sequencing: What triggers behaviour is as
+important as the behaviour itself.
 
-In this post, we will explore an approach to game development inspired
-by the spider. Rather than prioritizing isolated systems, our focus
-will shift toward their composition, viewing the game as a graph of
-interacting parts.
+** Objects to Systems: OOP and ECS as Foundations
 
-** Games as Data Machinery
+Traditional object-oriented design models games as collections of
+objects that combine state and behaviour. A player may store position,
+velocity, and health, and may expose methods such as ~move()~,
+~takeDamage()~, ~consumeItem()~. In this model, interactions occur
+through method dispatches between objects, often mediated by a central
+game loop. While it classifies data intuitively, this approach
+entangles behaviour and state in rigid class hierarchies, making
+large-scale modifications and extensions difficult as the game grows.
 
-A game can be viewed as a data flow graph. In this model, we separate
-ourselves into systems and state. State can belong to the game, or it
-can come from outside sources. State consists of player position, item
-lists, terrain data, and others. Conversely, systems act on
-state. Systems don't care about the source of the state, but only how
-the data interacts. To illustrate, a physics system doesn't care about
-which objects are at play, it only consumes physics states to simulate
-collisions and physical forces.
+Entity Component System (ECS) architectures emerge as a response to
+these limitations. Instead of binding behaviour to objects, ECS
+separate data into components and behaviour into systems. Entities
+become lightweight identifiers that group components, while systems
+operate on sets of components that match specific needs. For example,
+a physics system might process all entities containing position,
+velocity, and collision components, irrespective of the specific
+entities at play.
 
-Let us take a look at a physics sandbox demo to better understand this
-model.
+This separation improves modularity by allowing new behaviour to be
+introduced without modifying existing hierarchies. However, the
+underlying execution model remains fundamentally the same: a proactive
+loop that iterates over the system each frame, querying state and
+applying transformations. While game loops are appealing for their
+linearity and predictability, some game actions require reactivity
+over proactivity. When working with networking, save systems, large
+actions, story triggers, and similar subsystems, behaviour is often
+expressed as a response to external or internal events rather than as
+a part of a fixed cycle.
+
+To address this, many engines introduce event-driven layers on top of
+their core loop. Event buses, delegates, signals, and message systems
+allow parts of a game to react to changes without being explicitly
+polled each frame. A collision may emit an event, an input action may
+trigger a callback, and a network message might be dispatch to
+interested systems.
+
+However, this shift is only partial. While events introduce
+reactivity, they typically do so by attaching callbacks to objects or
+broadcasting messages through a shared bus, rather than exposing a
+structured representation of how interactions compose. The result is
+that reactive behaviour exists at runtime, but its structure remains
+implicit: It's distributed across subscribers and emitters, and cannot
+be reasoned about as a part of a unified system. In practice, this
+means that while ECS improves the modularity of data, the existing
+reactive layers remain inadequate at providing equivalent clarity for
+behaviour itself.
+
+The problem is not an absence of behaviour, but the absence of
+structure surrounding it. A callback describes what happens in
+response to an event, but it does not reveal how the reaction relates
+to the rest of the system. Dependencies remain implicit, making it
+difficult to reason about causality, analyse execution, or compose
+behaviour from smaller pieces. As games grow, the reactive topology
+increasingly disappears into implementation details, rather than
+existing as a representation that can be understood in its own
+right. Thus, putting reactivity at the forefront requires revealing
+the implicit structure of reactive interactions.
+
+** Structural Reactivity
+
+While traditional architectures build around a central loop, complex
+games rely heavily on reactive extensions to handle systems that don't
+cleanly fit frame-by-frame execution. This introduces a structural
+requirement: If a game is fundamentally leaning to reactiveness, then
+its primary unit of composition cannot be update steps, it must be the
+event itself. Without events as first-class elements, reactivity is
+always reconstructed indirectly through polling or scattered
+callbacks, rather than expressed directly as structure.
+
+Once events are treated as primary, a different pattern becomes
+apparent. Every event originates from some source, and is consumed by
+some set of reactions. An input action emits an event that is consumed
+by a player movement controller. A collision emits an event that is
+consumed by physics resolution and game rules. In both cases, events
+don't exist in isolation, they exist as relations between emitters and
+listeners.
+
+This relation induces structure, emitters and listeners form directed
+connections. With enough connections, the cluster of emitters and
+listeners form a graph. Nodes represent events, and edges represent
+listeners. What is typically implemented as an event bus or callback
+system is, structurally, already a graph of interactions.
+
+To solidify the concept, let's look at a physics demo involving input,
+physics, and object generation:
 
 #+INCLUDE: ".game-graph-demo.html" export html
 
-Breaking things down, we see that the game takes Inputs externally. It
-holds an internal state of Balls and Surfaces. Then, the game has
-interactions with Gravity, Physics, Physics Responses, and Spawners.
+By examining the flow of interactions in the game, we can extract the
+underlying structure:
 
-We will now draw a graph that separated external state, internal
-state, and systems. State interacts with systems, and systems update
-state. We will use directional arrows to denote state entering system,
-and system updating state.
-
-#+begin_src dot :file games-as-graphs-fsm-1.svg :exports results
+#+BEGIN_SRC dot :file games-as-graphs-full-1.svg :exports results
   digraph G {
       rankdir=LR;
-      node [shape=box, style="rounded", fontname="sans-serif"];
-      edge [arrowhead=vee, minlen=2];
+      fontname="Arial";
+      nodesep=0.8;
 
-      Input[shape=circle];
-      subgraph cluster_state {
-          label = "State";
-          style = dashed;
-          color = black;
-          
-          Surfaces; Balls;
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+      or_game [label="or"];
+      or_event [label="or"];
+      choice_circle [label="or"];
+
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+
+      subgraph cluster_physics {
+          label = "Per-tick execution";
+          color = lightgrey;
+
+          GameTick -> or_game;
+          or_game -> Null;
+          or_game -> PhysicsTrigger;
+          PhysicsTrigger -> PhysicsJob;
+
+          Null -> PhysicsExecute;
+          PhysicsJob -> PhysicsExecute;
+
+          PhysicsExecute -> choice_circle;
+          choice_circle -> PhysicsExecute;
+          choice_circle -> PhysicsResult [label="Later"];
       }
 
-      subgraph cluster_systems {
-          label = "Systems";
-          style = dashed;
-          color = black;
-  	node [shape=diamond, style="solid"]
-          
-          Gravity; Physics; Response; Spawner;
-          
-          Gravity -> Physics;
-          Physics -> Response;
+      subgraph cluster_results {
+          label = "Physics Resolution";
+          color = lightgrey;
+
+          Poll [label="PhysicsResult"]
+
+          Poll -> Update;
+          Update -> End_Update [style=dashed];
+          End_Update [shape=point, style=invis];
       }
 
-      Balls -> Physics;
-      Surfaces -> Physics;
-      Response -> Balls;
+      subgraph cluster_input {
+          label = "Input Handling";
+          color = lightgrey;
 
-      Input -> Spawner;
-      Spawner -> Balls;
-      Spawner -> Surfaces;
+          Event -> or_event;
+
+          or_event -> FinishDraw;
+          or_event -> KeepDraw;
+          or_event -> StartDraw;
+          or_event -> SpawnBullet;
+
+          FinishDraw -> SpawnSurface;
+
+          SpawnSurface -> End_Switch [style=dashed];
+          KeepDraw -> End_Keep [style=dashed];
+          StartDraw -> End_Start [style=dashed];
+          SpawnBullet -> End_Bull [style=dashed];
+
+          End_Switch [shape=point, style=invis];
+          End_Keep [shape=point, style=invis];
+          End_Start [shape=point, style=invis];
+          End_Bull [shape=point, style=invis];
+      }
   }
-#+end_src
+#+END_SRC
 
 #+RESULTS:
-[[file:games-as-graphs-fsm-1.svg]]
+[[file:games-as-graphs-full-1.svg]]
 
-Dataflow is an intuitive representation of procedural approaches to
-games. Representing each node as its own unit of data provides a
-literal representation of our graph. A Ball is an object, it enters a
-Physics method simulating gravity and collision forces, and a Response
-method then finalizes any remaining action before returning back.
+What this reveals isn't merely a visualisation of behaviour, but the
+actual organisation of reactive logic. Each event participates in at
+least one relationship of emission and consumption, and the system as
+a whole is defined by these relationships. The graph is not an
+interpretation of the system, it is the structure that the system
+already implements.
 
-However, generalising from concrete objects requires abstraction and
-superclassing. For example, adding a separate Triangle object beside
-Balls requires that we abstract a RigidBody for the Physics
-system. This is fine for finished projects, but for evolving
-prototypes, abstracting objects through development cycles introduces
-additional mental overhead. A better approach would be to break large
-objects into the smallest sensible modules outright.
+From this perspective, a crucial distinction comes to light. Events
+describe observations about the system, but they do not themselves
+describe behaviour. Behaviour emerges from the transformations
+relating one event to another. While an event may represent a
+meaningful fact, it is the transformation that specifies how the
+system responds to that fact. Consequently, the graph cannot be
+decomposed into isolated events without losing the behaviour it
+represents. The smallest unit that captures behaviour is therefore the
+transformation connecting events.
 
-To achieve the modulary, a common architecture is the use of Entity
-Component Systems (ECS). In this approach, Entities (concrete data)
-only carry links to their smaller Components. For example, a Ball is
-formed of Position, Velocity, and CollisionBody components. This model
-gives us natural Archetyping, where Components remain as pure data,
-and Systems assign groups of Components their meaning. Under the
-Physics system, the trio of Position, Velocity, and CollisionBody
-provide a RigidBody archetype. The system no longer cares about the
-larger object, instead it focuses on the units of data that it
-requires, and nothing more. A Triangle is then introduced under the
-same Archetype without influencing any existing instance of the
-Archetype, keeping any faults in Triangle handling local.
+Inspecting such a transformation more closely, each edge consumes an
+incoming event, applies state-dependent logic, and emits one or more
+resulting events. Unlike events, which merely denote observations,
+these transformations encapsulate the behaviour of the system. They
+are therefore the natural units from which larger reactive structures
+are composed.
 
-There are also performance benefits to ECS. Instead of storing
-Component data on the Entities, each Entity is instead a collection of
-indices to the Component tables. Though the exact implementations
-vary, an approach is to make use of the previously mentioned
-archetypes to group data that is often used together into large
-tables, meaning the Physics system has local, cache-friendly access to
-all the data it needs.
+By now, the problem has become one of composition, not
+representation. If a game is to be represented as a web of
+interactions, then a usable framework must define primitives that
+allow individual transformations to be assembled. Without these
+primitives, the graph remains descriptive rather than constructive.
 
-Even if ECS is a success story on data, it loses expressive power on
-interactions. Complex games may have a large range of systems like
-network connections, enemy AI, complicated physics, multi-stage game
-mechanics, and more. For a wide variety of systems, its often awkward
-to handle everything by pure state. Having flags and queues for
-asynchronous events quickly grows in complexity. Because of this, many
-games using ECS create an Event Bus system that allows for easier
-asynchronous processing. However, the Event Bus also obscures the true
-nature of incoming and outgoing events. In the next section, we will
-explore an approach that tries to alleviate this problem.
+** An Algebra of Interactions
 
-** Actions and Reactions
+At this point, the description of a game as a graph of events is no
+longer sufficient on its own. While the structure has become explicit,
+it remains static. To resolve this, we shift our problem a final
+time. Instead of asking about the structure of the whole of the game,
+we will now emphasise the role of individual interactions, and study
+the rules with which interactions compose.
 
-ECS places data at the center of its narrative. This caused problems
-in asynchronous handling. Taking inspiration from the Event Bus, in
-this section, we place events at the heart of our architecture,
-constructing a new graph form whose edges represent the flow of
-actions rather than the flow of data.
+Since graphs are complex, there isn't a single primitive of
+composition. Instead, interactions behave under a small set of
+fundamental operations.
 
-Let us revisit the game,
+*** Parallel composition
 
-#+INCLUDE: ".game-graph-demo.html" export html
+Some transformations operate on independent components of a composite
+event. In this case, the separate transformations can be laid in
+parallel.
 
-This time, we will place events as the nodes of our graph. Then, each
-edge is a directed arrow that consumes one event as a trigger, and
-emits a new event. Internally, the arrow will mutate the necessary
-parts of state. There is some nuance to state handling covered on a
-followup post, so for now, we will assume all state is globally
-accessible to help with reasoning. The mutation will be represented as
-~f(state)~ on the edge, representing that the arrow internally calls
-~f~ which mutates ~state~.
+For example, both ~GameTick~ and ~Event~ originate from the outside
+world, but they are treated as causally independent. So, they follow
+parallel segments on the graph.
 
-#+begin_src dot :file games-as-graphs-arrow.svg :exports results
+#+BEGIN_SRC dot :file games-as-graphs-parallel.svg :exports results
   digraph G {
-  	rankdir=LR;
-  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
-  	edge [arrowhead=vee, minlen=2];
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
 
-  	Trigger; Emission;
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
 
-  	Trigger -> Emission [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>f(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+      GameTick -> Physics;
+      Physics [label="..."];
+
+      Event -> Spawns;
+      Spawns [label="..."];
   }
-#+end_src
+#+END_SRC
 
 #+RESULTS:
-[[file:games-as-graphs-arrow.svg]]
+[[file:games-as-graphs-parallel.svg]]
 
-Later on, we will analyze more of the individual properties of these
-arrows. For now, lets turn our attention to the full game graph. For
-the full game graph, to avoid clutter, the names of the internal ~f~
-functions are hidden. We can still infer that /some/ operation happens
-on the state as we pass through each edge.
+*** Sequenced composition
 
-#+begin_src dot :file games-as-graphs-fsm-2.svg :exports results
+When the output of one transformation matches the input of another,
+transformations can be chained. This produces a causal link where a
+long logical sequence is composed of intermediary stepping stones.
+
+In the example game, the creation, registration, execution, and
+resolution of game tasks are independent interactions. However, each
+step of the interactions requires the prior, thus these interactions
+are sequenced into one long branch that handles the whole of physics.
+
+#+BEGIN_SRC dot :file games-as-graphs-sequence.svg :exports results
   digraph G {
-  	rankdir=LR;
-  	edge [arrowhead=vee, minlen=2];
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
 
-  	X [shape=point];
-  	
-  	node [fontname="sans-serif", shape=rectangle, penwidth=0];
-  	triggerCond[label="if tasks.empty()"];
-  	triggerElse[label="else"];
-  	triggerBranch[label="", width=0];
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
 
-  	node [shape=circle, penwidth=1.0];
-  	GameTick -> triggerBranch [arrowhead=none];
-  	triggerBranch -> triggerCond [arrowhead=none]
-  	triggerCond -> PhysicsTrigger;
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
 
-  	triggerBranch -> triggerElse [arrowhead=none];
-  	triggerElse -> X;
+      GameTick -> PhysicsTrigger;
+      PhysicsTrigger -> PhysicsJob;
 
-  	PhysicsTrigger -> PhysicsResult;
+      PhysicsJob -> PhysicsExecute;
 
-  	PhysicsResult -> X;
-
-  	LeftClick -> X;
-
-  	RightClick -> DrawSurf;
-  	RightHold -> DrawSurf;
-  	RightRelease -> DrawSurf;
-  	DrawSurf -> X;
+      PhysicsExecute -> PhysicsResult [label="Later"];
   }
-#+end_src
+#+END_SRC
 
 #+RESULTS:
-[[file:games-as-graphs-fsm-2.svg]]
+[[file:games-as-graphs-sequence.svg]]
 
-Compared to the previous section, the new graph clarifies the system's
-control flow better. For instance, the Physics section now shows a
-distinct branch where the process skips physics entirely if a specific
-task list is non-empty. Similarly, Input is broken down into
-individual mouse events.
+*** Branching (fan-out)
 
-Remarkably, the new system is not dependent on time, update cycles, or
-any specific procedure. The system is purely declarative, only
-declaring the types of inputs it takes and reacts to. In contrast, an
-ECS would be proactive, an ~Update()~ is called on repeat and the
-various systems check for applicable data and events.
+A single transformation can produce multiple downstream
+interactions. A single event can therefore feed into multiple
+independent causal paths. This expresses divergent behaviour.
 
-The new system is no longer code that is graph-like, the new system
-/is/ the graph. The game graph /is/ also the implementation of the
-game. However, this insight is only half of our troubles, we also need
-a way to express the graph inside code, which is what we will explore
-in the next section.
+To illustrate, the single ~Event~, a variant type of mouse events,
+induces multiple actions relating to ball and surface creation.
 
-** Spider's Weave
-
-ECS was extensible because it has a clear building block. Though our
-new approach implies a compositional approach to graphs, we've yet to
-formulate this. In the previous section, we had isolated a single
-arrow from a trigger to an event. In this section, we will use the
-individual arrow as a building block of the whole of the graph.
-
-file:games-as-graphs-arrow.svg
-
-From now on, ~Trigger -f> Emission~ denotes the arrow that's seen
-above. We will use this text-based notation for inline explanations to
-avoid breaking up the train of thought with diagrams. Now, to
-construct graphs with the individual arrows, we need ways to join them
-together. There isn't a single, unified operation that covers all
-cases; instead, we will implement four operations, each defining a
-capability, a single face, of arrows. Altogether, the four operations
-will provide us the means to weave up a full web of events.
-
-To start, our first operation considers two arrows ~a -f> b~ and
-~c -g> d~. These arrows don't have any relation to one another.
-Given two independent arrows like this, we can use the first operation
-to lay the two arrows in parallel, so that they don't interfere.
-
-#+begin_src dot :file games-as-graphs-arrow-parallel.svg :exports results
+#+BEGIN_SRC dot :file games-as-graphs-fanout.svg :exports results
   digraph G {
-  	rankdir=LR;
-  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
-  	edge [arrowhead=vee, minlen=2];
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
 
-  	c; d; a; b;
-  	
-  	a -> b [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>f(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+      or [label="or"];
 
-  	c -> d [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>g(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+      Event -> or;
+      or -> SpawnBullet;
+      SpawnBullet -> End1 [style=dashed];
+      or -> StartDraw;
+      StartDraw -> End2 [style=dashed];
+      or -> KeepDraw;
+      KeepDraw -> End3 [style=dashed];
+      or -> FinishDraw;
+      FinishDraw -> End4 [style=dashed];
+
+      End1 [shape=point, style=invis];
+      End2 [shape=point, style=invis];
+      End3 [shape=point, style=invis];
+      End4 [shape=point, style=invis];
   }
-#+end_src
+#+END_SRC
 
 #+RESULTS:
-[[file:games-as-graphs-arrow-parallel.svg]]
+[[file:games-as-graphs-fanout.svg]]
 
-In the context of the game demo, each of the external inputs such as
-~LeftClick~, ~RightClick~, ~GameTick~, are stood parallel, as they are
-orthogonal actions. This demonstrates the use of the first operation
-as a means of append completely new lines of logic to the system.
+*** Merging (fan-in)
 
-The second operation will consider arrows ~a -f> b~ and ~b -g> c~,
-where one arrow's emission matches the other's trigger. In such cases,
-we can sequence the arrows one after the other.
+Multiple distinct transformations may converge into a single
+downstream interaction. In this case, different causal paths unify
+into a shared consequence.
 
-#+begin_src dot :file games-as-graphs-arrow-sequenced.svg :exports results
+For instance, whether a ~GameTick~ triggers a physics response or not
+doesn't influence the execution of physics. A new physics event might
+not register, but execution happens every tick.
+
+#+BEGIN_SRC dot :file games-as-graphs-fanin.svg :exports results
   digraph G {
-  	rankdir=LR;
-  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
-  	edge [arrowhead=vee, minlen=2];
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
 
-  	a -> b [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>f(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+      or [label="or"];
 
-  	b -> c [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>g(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+      GameTick -> or;
+      or -> PhysicsTrigger;
+      or -> Null;
+      PhysicsTrigger -> Dots;
+      Dots [label="..."];
+      Dots -> PhysicsExecute;
+      Null -> PhysicsExecute;
   }
-#+end_src
+#+END_SRC
 
 #+RESULTS:
-[[file:games-as-graphs-arrow-sequenced.svg]]
-
-Turning to the game demo again, sequencing appears in chain reactions
-like the one from ~GameTick~ to ~PhysicsTrigger~, and finally to
-~PhysicsResult~. The second operation then allows for small, isolated
-pieces of logic to combine into long chains of operations.
-
-There is now enough vocabulary to represent linear flows. The last two
-operations will then focus on branching control flow.
-
-The third operation handles the creation of branches. Given ~a -f> b~
-and ~a -g> c~, the operation branches a single input of ~a~ into both
-paths. This branching action is called a /fan-out/.
-
-#+begin_src dot :file games-as-graphs-arrow-fanout.svg :exports results
-  digraph G {
-  	rankdir=LR;
-  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
-  	edge [arrowhead=vee, minlen=2];
-
-  	a -> b [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>f(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
-
-  	a -> c [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>g(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
-  }
-#+end_src
-
-#+RESULTS:
-[[file:games-as-graphs-arrow-fanout.svg]]
-
-Though represented in individual pieces for clarity in the game graph,
-the mouse button events actually unify under an ~Event~, which we fan
-out to various handlers like ball spawning and surface creation.
-
-For the final operation, we will undo our fanout by joining
-branches. With arrows ~a -f> c~ and ~b -g> c~, since both output a
-~c~, we join them at the output so that either one of ~a~ or ~b~ can
-trigger a ~c~. The joining action is called a /fan-in/.
-
-#+begin_src dot :file games-as-graphs-arrow-fanin.svg :exports results
-  digraph G {
-  	rankdir=LR;
-  	node [shape=circle, fontname="sans-serif", fixedsize=true, width=1.2];
-  	edge [arrowhead=vee, minlen=2];
-
-  	a -> c [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>f(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
-
-  	b -> c [
-  		labeldistance=4,
-  		labelangle=0,
-  		headlabel=<
-  			<table bgcolor="white" border="0">
-  			       <tr>
-  					<td>g(state)</td>
-  			       </tr>
-  			</table>
-  		>
-  	]
-  }
-#+end_src
-
-#+RESULTS:
-[[file:games-as-graphs-arrow-fanin.svg]]
-
-In the game, all operations fan into a single exit event. Similarly,
-each one of ~RightClick~, ~RightHold~, and ~RightRelease~ fan into a
-~DrawSurf~ event.
-
-With the four operations complete, let's revisit the game one final
-time, and carve up the graph into each individual arrow we can find.
-
-#+begin_src dot :file games-as-graphs-fsm-2-indv.svg :exports results
-  digraph G {
-  	rankdir=TD
-  	edge [arrowhead=vee, minlen=2]
-  	
-  	node [fontname="sans-serif", shape=rectangle, penwidth=0]
-  	decidePhysics [label="decidePhysics"]
-  	applyPhysics [label="applyPhysics"]
-  	updateGame [label="updateGame"]
-  	spawnBall [label="spawnBall"]
-  	startDraw [label="startDraw"]
-  	updateDraw [label="updateDraw"]
-  	finaliseDraw [label="finaliseDraw"]
-  	spawnSurfOrWait [label="spawnSurfOrWait"]
-
-  	node [shape=point]
-  	X; X2; X3; X4;
-
-  	node [shape=circle, penwidth=1.0, fixedSize=true, width=1.2]
-
-  	GameTick -> decidePhysics [arrowhead=none, color=red]
-  	decidePhysics -> PhysicsTrigger [color=red]
-  	decidePhysics -> X [color=red]
-
-  	PhysicsTrigger2 [label="PhysicsTrigger"]
-  	PhysicsTrigger2 -> applyPhysics [arrowhead=none, color=green]
-  	applyPhysics -> PhysicsResult [color = green]
-
-  	PhysicsResult2 [label="PhysicsResult"]
-  	PhysicsResult2 -> updateGame [arrowhead=none, color=blue]
-  	updateGame -> X2 [color=blue]
-
-  	LeftClick -> spawnBall [arrowhead=none, color=orange]
-  	spawnBall -> X3 [color=orange]
-
-  	RightClick -> startDraw [arrowhead=none, color=purple]
-  	startDraw -> DrawSurf [color=purple]
-
-  	DrawSurf2 [label="DrawSurf"]
-  	RightHold -> updateDraw [arrowhead=none, color=cyan]
-  	updateDraw -> DrawSurf2 [color=cyan]
-
-  	DrawSurf3 [label="DrawSurf"]
-  	RightRelease -> finaliseDraw [arrowhead=none, color=yellow]
-  	finaliseDraw -> DrawSurf3 [color=yellow]
-
-  	DrawSurf4 [label="DrawSurf"]
-  	DrawSurf4 -> spawnSurfOrWait [arrowhead=none, color=lime]
-  	spawnSurfOrWait -> X4 [color=lime]
-  }
-
-#+end_src
-
-#+RESULTS:
-[[file:games-as-graphs-fsm-2-indv.svg]]
-
-#+begin_src dot :file games-as-graphs-fsm-2-hl.svg :exports results
-  digraph G {
-  	rankdir=LR;
-  	edge [arrowhead=vee, minlen=2];
-
-  	X [shape=point];
-  	
-  	node [fontname="sans-serif", shape=rectangle, penwidth=0];
-  	triggerCond[label="if tasks.empty()"];
-  	triggerElse[label="else"];
-  	triggerBranch[label="", width=0];
-
-  	node [shape=circle, penwidth=1.0];
-  	GameTick -> triggerBranch [arrowhead=none, color=red];
-  	triggerBranch -> triggerCond [arrowhead=none, color=red]
-  	triggerCond -> PhysicsTrigger [color=red];
-
-  	triggerBranch -> triggerElse [arrowhead=none, color=red];
-  	triggerElse -> X [color=red];
-
-  	PhysicsTrigger -> PhysicsResult [color=green];
-
-  	PhysicsResult -> X [color=blue];
-
-  	LeftClick -> X [color=orange];
-
-  	RightClick -> DrawSurf [color=purple];
-  	RightHold -> DrawSurf [color=cyan];
-  	RightRelease -> DrawSurf [color=yellow];
-  	DrawSurf -> X [color=lime];
-  }
-#+end_src
-
-#+RESULTS:
-[[file:games-as-graphs-fsm-2-hl.svg]]
-
-Some operations we can see in use here have already been mentioned,
-but with this new visual, we can see things more clearly. For example,
-there are three distinct arrows (purple, cyan, yellow) convering on a
-point (DrawSurf). We called this a /fan-in/ previously. Similarly, we
-see that red, green, blue is a sequence of three controllers. Red
-itself naturally contains a branching output, but this is due to its
-output being a variant (Either PhysicsTick or Exit), which is decided
-based on internal logic.
+[[file:games-as-graphs-fanin.svg]]
 
 ** Conclusion & What's Next?
 
-Just as ECS is the modularisation of data, treating each arrow on the
-graph as a composable piece provides modularisation of event
-handlers. However, beside the modular perspective, the two approaches
-diverge quickly. While the ECS treats data as first class, our arrow
-system treats data as secondary. In fact, currently, all state is
-global. This is complete chaos, since accidental mutations can break
-the isolation of events. Similarly, while ECS has an answer for large
-operations (grouping similar data in tables for fast access), our
-event graphs are currently acyclic, meaning feedback loops and bulk
-actions can't be formulated. The absence of state isolation and
-looping tasks creates a huge barrier for game creation.
+These four operations aren't design choices. They are the minimal
+structure for composing event transformations without ambiguity. Any
+system representing reactive behaviour must implicitly or explicitly
+support these operations. Without them, representations collapse into
+either unstructured callbacks, or rigid execution ordering.
 
-To close up these holes in the architecture, the next two posts
-explore various concepts. The first post introduces a new concept that
-masks values we don't care about to prevent accidental mutation. The
-second post introduces a scheduler system that can handle large tasks
-like collision and pathfinding asynchronously.
+However, the architecture hasn't reached a satisfying conclusion
+yet. So far, we have ignored state, only focusing on events. Since the
+event graph implies nothing about state dependencies, we ca n only
+assume all state is globalized. There is no need to worry, however, as
+the second post in the series discusses how state can be localized in
+a reactive system.
 
-*Note:* The game's implementation can be found on [[https://github.com/Pancakey8/balls/tree/main][Github]] or
- [[https://codeberg.org/Pancakey8/balls/src/branch/main][Codeberg]]. It is written in /Idris/, which is a functional
- language. For readers foreign to functional code, searching
- ~interface Arrow~ in ~src/Component.idr~ brings the type definitions
- of the operations defined in this post, which should provide some
- syntactic visual of how things look behind the scenes.
+Moreover, readers who are observant may have noticed that the
+~PhysicsExecute~ loops into itself. Our four rules don't yet mention
+anything of loops. In fact, our rules perfectly construct directed
+acyclic graphs (DAG) and nothing else. To bridge the gap from acyclic
+graphs to cyclic ones, we will introduce new primitives on the third
+post, also concerning ourselves with the asynchronous job system
+implied in this post.
+
+To conclude, we began with familiar game architectures and observed that their
+reactive subsystems already form an implicit graph. By treating that
+graph as the primary representation rather than an implementation
+detail, behaviour becomes something that can be composed algebraically
+instead of orchestrated procedurally. In the next articles we extend
+this foundation with localized state and cyclic interactions,
+completing the transition from event graphs to a fully reactive
+execution model.
