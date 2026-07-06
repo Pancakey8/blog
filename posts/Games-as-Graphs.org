@@ -1,9 +1,9 @@
 #+INCLUDE: .post-header.org
 
-#+TITLE: Games as Event Graphs
+#+TITLE: Composing Games from Event Graphs
 #+AUTHOR: Pancake
 #+DATE: 2026-07-04
-#+DESCRIPTION: We analyze an architecture that formulates games as a flow of events.
+#+DESCRIPTION: We analyze an architecture that composes games from event-based interactions.
 #+DRAFT: true
 
 Traditional game architectures are typically built around an explicit
@@ -81,7 +81,7 @@ existing as a representation that can be understood in its own
 right. Thus, putting reactivity at the forefront requires revealing
 the implicit structure of reactive interactions.
 
-** Structural Reactivity
+** Structured Reactivity
 
 While traditional architectures build around a central loop, complex
 games rely heavily on reactive extensions to handle systems that don't
@@ -364,26 +364,28 @@ not register, but execution happens every tick.
 
 ** Conclusion & What's Next?
 
-These four operations aren't design choices. They are the minimal
-structure for composing event transformations without ambiguity. Any
-system representing reactive behaviour must implicitly or explicitly
-support these operations. Without them, representations collapse into
-either unstructured callbacks, or rigid execution ordering.
+So far, we've identified four operations of composition. These
+operations are more than design choices. They correspond to
+fundamental forms of composition studied in mathematics (readers
+familiar with Category Theory may recognise them as operations on
+arrows). Any graph-based representation of reactive behaviour
+expresses these forms, either explicitly or implicitly.
 
 However, the architecture hasn't reached a satisfying conclusion
 yet. So far, we have ignored state, only focusing on events. Since the
-event graph implies nothing about state dependencies, we ca n only
-assume all state is globalized. There is no need to worry, however, as
-the second post in the series discusses how state can be localized in
-a reactive system.
+event graph implies nothing about state dependencies, we can only
+assume all state is effectively global. There is no need to worry,
+however, as the second post in the series discusses how state can be
+localized in a reactive system.
 
 Moreover, readers who are observant may have noticed that the
-~PhysicsExecute~ loops into itself. Our four rules don't yet mention
-anything of loops. In fact, our rules perfectly construct directed
-acyclic graphs (DAG) and nothing else. To bridge the gap from acyclic
-graphs to cyclic ones, we will introduce new primitives on the third
-post, also concerning ourselves with the asynchronous job system
-implied in this post.
+~PhysicsExecute~ loops into itself. Our four operations don't yet
+mention anything of loops. In fact, our operations perfectly construct
+directed acyclic graphs (DAG), which doesn't match the accumulative
+behaviours of games. To bridge the gap from acyclic graphs to cyclic
+ones, we will introduce new primitives on the third post, also
+concerning ourselves with the asynchronous job system implied in this
+post.
 
 To conclude, we began with familiar game architectures and observed that their
 reactive subsystems already form an implicit graph. By treating that

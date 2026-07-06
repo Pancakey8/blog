@@ -1,0 +1,239 @@
+#+INCLUDE: .post-header.org
+
+#+TITLE: Local State in Event-centric Games
+#+AUTHOR: Pancake
+#+DATE: 2026-07-06
+#+DESCRIPTION: TODO
+#+DRAFT: true
+
+In the previous post, we described games as graphs of event
+transformations. This shifted the focus from frame-based execution
+toward compositional behaviour, where interactions are defined by how
+events produce other events.
+
+This representation captures causality, but leaves state outside the
+structure. State is still required for transformations, yet it is not
+organised by the graph. Instead, it is implicitly shared across the
+system, accessed without regard to causal boundaries.
+
+This post introduces a way to localize state boundaries within the
+event structure while preserving a single, global view of the
+world. The result is a model where state becomes part of the same
+compositional system as events, rather than an external layer. More
+importantly, treating persistent state as part of the structure of the
+game causes useful invariants to emerge automatically. While they are
+only a byproduct of the representation introduced here, these
+invariants become the key ingredient in constructing a safe
+asynchronous scheduler in the next post.
+
+** Localized Access to a Global World: Projections
+
+In games, most interactions only depend on narrow slices of the
+collective state. For example, a physics step doesn't need to know
+about UI rendering details. Likewise, the UI state doesn't depend on
+the states of physics bodies. Each system acts on a narrow context,
+even though the system as a whole contains more information. This
+suggests that distinct pieces of data live alongside one another,
+which can be collected into one tuple representing the complete state
+of the world.
+
+To illustrate, let's reintroduce the game demo from the previous post:
+
+#+INCLUDE: ".game-graph-demo.html" export html
+
+This game has a collective state of:
+
+~(Balls, Surfaces, PhysicsSlot, SurfaceUI)~.
+
+Yet, each system acts on various sub-tuples of the whole world.
+ - Placing balls only acts on ~Balls~
+ - Placing surfaces acts on ~Surfaces~ and ~SurfaceUI~
+ - Creating a physics task acts on ~Balls~ and ~Surfaces~, but
+   registering, executing, and polling the task only requires
+   ~PhysicsSlot~.
+
+To bridge the gap between local access and the global source of truth,
+a /mask/ can be constructed. For example, if placing a surface only
+requires ~Surface~ and ~SurfaceUI~, a mask for this access can be
+constructed as:
+
+~(Skip, Keep, Skip, Keep)~
+
+The mask represents an access pattern to the global state
+tuple. However, the mask yields no information on its own, it only
+specifies which components are visible. Applying the mask requires a
+/projection function/. The function extracts the slots of data marked
+~Keep~, leaving out the other components. The workflow is illustrated
+below:
+
+#+BEGIN_SRC dot :file game-state-projection.svg :exports results
+  graph G {
+      rankdir=TB;
+      fontname="Arial";
+      nodesep=0.6;
+      ranksep=0.6;
+
+      node [shape=box, style="rounded,filled", fixedsize=true, width=1.2, fillcolor="#f7f7f7", fontname="Arial"];
+
+      Balls -- Skip1 [dir=forward];
+      Surfaces -- Keep1 -- SurfacesP [dir=forward];
+      PhysicsSlot -- Skip2 [dir=forward];
+      SurfaceUI -- Keep2 -- SurfaceUIP [dir=forward];
+
+      Skip1 [label="Skip"];
+      Skip2 [label="Skip"];
+      Keep1 [label="Keep"];
+      Keep2 [label="Keep"];
+
+      X1 [label="", fillcolor="#202020", style=invis];
+      X2 [label="", fillcolor="#202020", style=invis];
+
+      SurfacesP [label="Surfaces"];
+      SurfaceUIP [label="SurfaceUI"];
+
+      subgraph cluster_align_tuple {
+          style=dashed;
+          color=lightgrey;
+          label="World";
+          labelloc=t;
+          
+          { rank=same; Balls -- Surfaces -- PhysicsSlot -- SurfaceUI [style=invis]; }
+      }
+
+      { rank=same; Skip1 -- Keep1 -- Skip2 -- Keep2 [style=invis]; }
+
+      subgraph cluster_out_tuple {
+          style=dashed;
+          color=lightgrey;
+          label="Projected";
+          labelloc=b;
+          
+          { rank=same; X1 -- SurfacesP -- X2 -- SurfaceUIP [style=invis]; }
+      }
+  }
+#+END_SRC
+
+#+RESULTS:
+[[file:game-state-projection.svg]]
+
+Importantly, masks are defined solely from the global world
+state. Once that state has been fixed, every projection is determined
+independently of the event graph itself. Consequently, introducing
+projections does not change the existing rules of event composition;
+it merely restricts which portion of the global state each
+transformation may observe.
+
+** Masks in Practice
+
+So far, it seems like masks are more fundamental than pieces of
+state. Instead of accessing ~Balls~, interactions now access
+~(Keep, Skip, Skip, Skip)~. However, maintaining data dependencies
+in code through magic tuples is not helpful. In a complex game with
+dozens of distinct components of data, a single tuple can not only
+be cumbersome to type, but it also becomes error prone. Since the
+tuple specifies nothing but /indices/ to a global state, game iterations
+can misalign the indices, causing access to the wrong pieces of data.
+
+To address this issue, we need a systematic way to construct the mask
+tuples from local data automatically. Rather than specifying a magic
+tuple, we may specify ~(Balls, PhysicsUnit)~, and get back,
+~(Keep, Skip, Keep, Skip)~ automatically.
+
+Most static languages would model this by mapping data to IDs or
+enums, then defining data requirements by referring to these
+enums. Some languages would offer /reflection/, which would allow
+direct inspection of types, avoiding the manual mapping to IDs.
+
+In /Idris/, the language used to implement the game demo, there is a
+third option which completely hides the construction of masks from the
+end user. Idris has a mechanism that can automatically construct data
+whose construction follows deterministic rules. Since masks follow a
+structure entirely defined by the local data requirements as well as
+the global state tuple, its construction is trivial for Idris, so long
+as the rules are provided.
+
+To introduce the construction rules, the implementation defines a
+~SubList small great~, which states that ~small~ is a valid local state for ~great~.
+If this statement holds, then Idris constructs an instance for ~SubList~
+automatically, and the instance is a mask on ~great~ that isolates
+components requires for ~small~. The instance isn't constructed
+arbitrarily, the rules must be presented concretely:
+ 1. While ~small~ has components, take the first component.
+ 2. If the first components of ~small~ and ~great~ match, pop both and
+    emit ~Keep~
+ 2. If the first components don't match, pop only ~great~ and emit
+    ~Skip~.
+ 3. Once ~small~ is empty, emit ~Empty~, which skips the remainder of
+    ~great~.
+
+Below is a snippet from the Idris REPL that demonstrates the
+construction:
+
+#+BEGIN_SRC idris
+λΠ> let mask : SubList [List Surface, SurfSpawner] [List Ball, List Surface, PhysicsSlot, SurfSpawner];
+        mask = %search; -- Ask Idris to search an instance
+    in mask
+Skip (Keep (Skip (Keep Empty)))
+-- ^- Linked list: Skip -> Keep -> Skip -> Keep -> Empty
+#+END_SRC
+
+Thus, when using the Idris implementation, specifying the mask isn't
+necessary. Idris infers the types of ~small~ and ~great~ from context,
+then construct ~SubList~ automatically, hiding the masks and
+projections as an implementation detail. Furthermore, since the masks
+are constructed at compile-time, they remain type-safe and their
+construction incurs no runtime cost.
+
+** Persistent Structure
+
+In the current system, events are transient. They arise, trigger
+reactions, then disappear. State, on the other hand, is
+persistent. Inevitably, any property that remains true throughout
+execution is expressed as state.
+
+Thus, the projection system has an interesting yet subtle side
+consequence. By enforcing that all state is a projection from a global
+state tuple, we also unintentionally enforced that all persistent
+properties of the game live in a tuple.
+
+This makes the tuple of the world state more than an implementation
+detail. The tuple also describes structural properties that cannot
+change during execution. For example, if the game defines that the map
+is a ~Vect 10 Surface~, then it is structurally fixed that the game
+carries only 10 surfaces. Interactions can modify the contents of this
+vector, they can choose to omit handling surfaces at some indices, but
+it is structurally fixed that the system can't represent 15 surfaces.
+
+In the next post, this system is used to express structured task
+scheduling, where a statically fixed budget will be allocated to
+queues of various tasks. This allows the performance of a game to be
+predictable. For example, fixing ~PhysicsSlot~ as a job slot of ~512~
+budget, the game is structurally known to only handle 512 physics
+interactions per execution.
+
+** Conclusion
+
+In this post, we extended the event graph with a notion of localized
+state. Rather than treating state as a globally accessible resource,
+each interaction now operates on a projection of a single world
+state. Masks describe these projections independently of the event
+graph, allowing state locality to be introduced without changing the
+compositional structure established in the previous post.
+
+More importantly, this representation reveals that persistent state
+carries structural information about the game itself. Since events are
+transient while state persists, any invariant that should hold
+throughout execution naturally becomes part of the world
+representation. These guarantees are not introduced through additional
+runtime mechanisms, but emerge from the organization of state itself.
+
+However, one significant gap remains. Although interactions now
+compose over both events and localized state, our model still
+describes only acyclic propagation of behaviour. Many gameplay
+systems, including asynchronous job execution, deferred work, and
+iterative processing, require behaviour that feeds back into the
+system over time. In the final post of this series, we introduce the
+primitives required to express these cyclic interactions, showing how
+event graphs can model bounded asynchronous execution while preserving
+the structural guarantees developed here.
+
