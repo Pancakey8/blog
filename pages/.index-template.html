@@ -1,56 +1,54 @@
 <!DOCTYPE html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pancake's Homepage</title>
   <link rel="stylesheet" type="text/css" href="index.css" />
 </head>
 
 <body>
-  <div id="base-layout">
-    <div id="left-column">
-      <div id="me">
-        <h1>Hello,</h1>
-        <p>
-	  I am Pancake, a computer engineering student with a focus on maths, formal verification, and language design.
-        </p>
-        <table id="links">
-	  <tr>
-	    <td><b class="link-name">Github</b></td>
-	    <td><a href="https://github.com/Pancakey8/">https://github.com/Pancakey8/</a></td>
-	  </tr>
-  
-	  <tr>
-	    <td><b class="link-name">Codeberg</b></td>
-	    <td><a href="https://codeberg.org/Pancakey8/">https://codeberg.org/Pancakey8/</a></td>
-	  </tr>
-        </table>
+  <main id="app-container">
+    
+    <section id="profile-card">
+      <h1>Hello,</h1>
+      <p>
+        I am Pancake, a computer engineering student with a focus on maths, formal verification, and language design.
+      </p>
+      <nav class="social-links">
+        <a href="https://github.com/Pancakey8/" rel="noopener" target="_blank">GitHub</a>
+        <a href="https://codeberg.org/Pancakey8/" rel="noopener" target="_blank">Codeberg</a>
+      </nav>
+    </section>
+
+    <section id="projects-section">
+      <h2>Some Projects</h2>
+      <div class="project-grid">
+        <article class="project-item">
+          <div class="project-header">
+            <strong class="project-name">Charta</strong>
+            <a href="https://github.com/Pancakey8/charta-cpp/" rel="noopener" target="_blank" class="project-link">Source</a>
+          </div>
+          <p>A concatenative, 2-dimensional language with stack effect analysis.</p>
+        </article>
+        
+        <article class="project-item">
+          <div class="project-header">
+            <strong class="project-name">Pea</strong>
+            <a href="https://github.com/Pancakey8/pea/" rel="noopener" target="_blank" class="project-link">Source</a>
+          </div>
+          <p>Object-oriented, Visual Basic-inspired language with a dynamic editing environment.</p>
+        </article>
       </div>
-      <div id="projects">
-        <h1>Some Projects</h1>
-        <table id="project-list">
-	  <tr>
-	    <td>
-	      <b class="project-name">Charta</b>
-	      <br>
-	      <a href="https://github.com/Pancakey8/charta-cpp/">Github</a>
-	    </td>
-	    <td><p>A concatenative, 2-dimensional language with stack effect analysis</p></td>
-	  </tr>
-	  <tr>
-	    <td>
-	      <b class="project-name">Pea</b>
-	      <br>
-	      <a href="https://github.com/Pancakey8/pea/">Github</a>
-	    </td>
-	    <td><p>Object oriented, Visual Basic inspired language with a dynamic editing environment.</p></td>
-	  </tr>
-        </table>
-      </div>
-    </div>
-    <div id="post-box">
-      <h1>Posts</h1>
-      <ul id="posts">
-	{{{posts}}}
+    </section>
+
+    <section id="blog-section">
+      <h2>Posts</h2>
+      <ul id="posts-list">
+        {{{posts}}}
       </ul>
-    </div>
-  </div>
+    </section>
+
+  </main>
 </body>
 </html>

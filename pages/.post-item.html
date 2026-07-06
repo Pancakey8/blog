@@ -1,6 +1,9 @@
 <li>
-  <a href="posts/{{{filename}}}.html">
-    <h3>{{{title}}}</h3>
+  <a href="posts/{{{filename}}}.html" class="post-link">
+    <div class="post-header">
+      <h3 class="post-title">{{{title}}}</h3>
+      <time class="post-date" datetime="{{{date}}}">{{{date}}}</time>
+    </div>
+    <p class="post-desc">{{{desc}}}</p>
   </a>
-  <span>{{{date}}} | {{{desc}}}</span>
 </li>

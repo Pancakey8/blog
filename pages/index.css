@@ -21,49 +21,93 @@ li {
     margin: 0.5em 0;
 }
 
-#base-layout {
-    width: 50%;
-    height: 100%;
-    margin: auto;
+#posts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#posts-list li:not(:last-child) {
+  border-bottom: 1px solid #2a2a2a;
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.post-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.post-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.post-title {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.post-date {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9rem;
+  color: #777;
+}
+
+.post-desc {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #777;
+  line-height: 1.4;
+}
+
+@media (min-width: 550px) {
+  .post-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+}
+
+#app-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.social-links {
+  display: flex;
+  gap: 1rem;
+}
+
+.project-item {
+  margin-bottom: 1.5rem;
+}
+
+.project-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+@media (min-width: 768px) {
+  #app-container {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: 1fr;
-    grid-column-gap: 0px;
-    grid-row-gap: 0px; 
-    border-inline: 3px solid #dadada;
-    padding-left: 2%;
-    padding-right: 2%;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    padding: 3rem;
+  }
+  
+  #blog-section {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
 }
-
-#links {
-    grid-area: 1 / 2 / 2 / 3;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-#left-column {
-    display: flex;
-    flex-flow: column;
-    gap: 2%;
-}
-
-.link-name {
-    margin-right: 5em;
-}
-
-#posts {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-#posts > li {
-    margin: 0;
-    padding: 0 1em;
-}
-
-#projects > table {
-    border-spacing: 20px;
-}
-
