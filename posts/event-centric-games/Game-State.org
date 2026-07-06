@@ -1,10 +1,11 @@
-#+INCLUDE: .post-header.org
+#+INCLUDE: ".navigation.org"
+
+#+INCLUDE: ../.post-header.org
 
 #+TITLE: Local State in Event-centric Games
 #+AUTHOR: Pancake
 #+DATE: 2026-07-06
-#+DESCRIPTION: TODO
-#+DRAFT: true
+#+DESCRIPTION: After building rules of composition, we turn out attention to another problem: Representing state.
 
 In the previous post, we described games as graphs of event
 transformations. This shifted the focus from frame-based execution
@@ -146,11 +147,10 @@ direct inspection of types, avoiding the manual mapping to IDs.
 
 In /Idris/, the language used to implement the game demo, there is a
 third option which completely hides the construction of masks from the
-end user. Idris has a mechanism that can automatically construct data
-whose construction follows deterministic rules. Since masks follow a
-structure entirely defined by the local data requirements as well as
-the global state tuple, its construction is trivial for Idris, so long
-as the rules are provided.
+end user. Idris can automatically construct data whose structure
+follows deterministic rules. Since a mask is completely determined by
+the local requirements and the global state tuple, Idris can construct
+it automatically once the construction rules are provided.
 
 To introduce the construction rules, the implementation defines a
 ~SubList small great~, which states that ~small~ is a valid local state for ~great~.
@@ -161,9 +161,9 @@ arbitrarily, the rules must be presented concretely:
  1. While ~small~ has components, take the first component.
  2. If the first components of ~small~ and ~great~ match, pop both and
     emit ~Keep~
- 2. If the first components don't match, pop only ~great~ and emit
+ 3. If the first components don't match, pop only ~great~ and emit
     ~Skip~.
- 3. Once ~small~ is empty, emit ~Empty~, which skips the remainder of
+ 4. Once ~small~ is empty, emit ~Empty~, which skips the remainder of
     ~great~.
 
 Below is a snippet from the Idris REPL that demonstrates the
@@ -191,10 +191,10 @@ reactions, then disappear. State, on the other hand, is
 persistent. Inevitably, any property that remains true throughout
 execution is expressed as state.
 
-Thus, the projection system has an interesting yet subtle side
-consequence. By enforcing that all state is a projection from a global
-state tuple, we also unintentionally enforced that all persistent
-properties of the game live in a tuple.
+Thus, the projection system also has an unexpected side consequence.
+By enforcing that all state is a projection from a global state tuple,
+we also unintentionally enforced that all persistent properties of the
+game live in a tuple.
 
 This makes the tuple of the world state more than an implementation
 detail. The tuple also describes structural properties that cannot
@@ -208,8 +208,8 @@ In the next post, this system is used to express structured task
 scheduling, where a statically fixed budget will be allocated to
 queues of various tasks. This allows the performance of a game to be
 predictable. For example, fixing ~PhysicsSlot~ as a job slot of ~512~
-budget, the game is structurally known to only handle 512 physics
-interactions per execution.
+budget like ~JobSlot 512 PhysicsTask~, the game cannot execute more
+than 512 physics interactions per-frame.
 
 ** Conclusion
 
@@ -228,8 +228,8 @@ representation. These guarantees are not introduced through additional
 runtime mechanisms, but emerge from the organization of state itself.
 
 However, one significant gap remains. Although interactions now
-compose over both events and localized state, our model still
-describes only acyclic propagation of behaviour. Many gameplay
+compose over both events and localized state, our composition model
+still describes only acyclic propagation of behaviour. Many gameplay
 systems, including asynchronous job execution, deferred work, and
 iterative processing, require behaviour that feeds back into the
 system over time. In the final post of this series, we introduce the

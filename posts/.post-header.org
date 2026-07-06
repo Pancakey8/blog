@@ -1,4 +1,4 @@
-#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="post-style.css" />
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="/posts/post-style.css" />
 #+OPTIONS: html-postamble:nil
 #+OPTIONS: title:nil author:nil date:nil toc:nil
 

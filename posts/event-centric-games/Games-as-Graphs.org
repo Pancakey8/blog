@@ -1,10 +1,11 @@
-#+INCLUDE: .post-header.org
+#+INCLUDE: ".navigation.org"
+
+#+INCLUDE: ../.post-header.org
 
 #+TITLE: Composing Games from Event Graphs
 #+AUTHOR: Pancake
 #+DATE: 2026-07-04
 #+DESCRIPTION: We analyze an architecture that composes games from event-based interactions.
-#+DRAFT: true
 
 Traditional game architectures are typically built around an explicit
 execution loop. Each frame, a fixed sequence of actions occur. In this

@@ -1,0 +1,27 @@
+@@html:<h2>Navigation</h2>@@
+
+This post is a part of a larger series. Please read in order.
+
+#+BEGIN_SRC emacs-lisp :var files='("Games-as-Graphs.org" "Game-State.org") :exports results :results raw
+  (mapconcat
+   (lambda (file)
+     (let* ((current-file (buffer-file-name))
+            ;; Expand paths to make sure comparison is accurate
+            (is-current (and current-file 
+                             (string= (expand-file-name file) 
+                                      (expand-file-name current-file))))
+            ;; Extract the TITLE from the target file
+            (title (with-current-buffer (find-file-noselect file)
+                     (or (cadar (org-collect-keywords '("TITLE")))
+                         (file-name-base file))))) ; Fallback to filename if no TITLE
+       
+       (cond
+        ;; 1 & 3: If it's the current file, show title (no link) + "You are here"
+        (is-current 
+         (format "- *%s* (You are here)" title))
+        ;; 2 & 3: Otherwise, create a functional link with the extracted title
+        (t 
+         (format "- [[file:%s][%s]]" file title)))))
+   files
+   "\n")
+#+END_SRC

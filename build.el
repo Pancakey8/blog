@@ -18,22 +18,24 @@
 
 (setq org-confirm-babel-evaluate
       (lambda (lang body)
-        (not (string= lang "dot"))))
+        (not (member lang '("dot" "emacs-lisp")))))
 
 (org-babel-do-load-languages
  'org-babel-load-languages
- '((dot . t)))
+ '((dot . t)
+   (emacs-lisp . t)))
 
-(defun my/get-org-file-metadata (file)
-  "Extract title and date from an org file."
+(defun my/get-org-file-metadata (file base-dir)
+  "Extract title, date, relative path, description, and draft status from an org file."
   (with-temp-buffer
     (insert-file-contents file)
     (let ((title (or (cadar (org-collect-keywords '("TITLE"))) "Untitled"))
           (date (or (cadar (org-collect-keywords '("DATE"))) ""))
-	  (desc (or (cadar (org-collect-keywords '("DESCRIPTION"))) ""))
-          (filename (file-name-base file))
-	  (draft (or (cadar (org-collect-keywords '("DRAFT"))) "false")))
-      (list title date filename desc draft))))
+          (desc (or (cadar (org-collect-keywords '("DESCRIPTION"))) ""))
+          ;; Calculate relative path without the extension (e.g., "foo/X")
+          (rel-path (file-name-sans-extension (file-relative-name file base-dir)))
+          (draft (or (cadar (org-collect-keywords '("DRAFT"))) "false")))
+      (list title date rel-path desc draft))))
 
 (defun my/generate-homepage ()
   "Create HTML list items from org files and inject into index.html."
@@ -42,7 +44,7 @@
          (index-template "./pages/.index-template.html")
          (dist-dir "./dist/")
          (output-index (concat dist-dir "index.html"))
-         (post-files (directory-files posts-dir t "^[^\\.].*\\.org$"))
+         (post-files (directory-files-recursively posts-dir "\\.org$"))
          (items-html ""))
 
     ;; 1. Ensure the dist directory exists so we don't get a 'path not found' error
@@ -50,21 +52,23 @@
     
     ;; 2. Build the list of HTML items by reading metadata from each .org file
     (dolist (file post-files)
-      (let* ((meta (my/get-org-file-metadata file))
-	     (is-draft (nth 4 meta)))
-        (unless (equal is-draft "true")
-	  (setq items-html (concat items-html (with-temp-buffer 
-						(insert-file-contents template-file)
-						(goto-char (point-min))
-						;; Replace our placeholders with actual data
-						(while (search-forward "{{{title}}}" nil t) (replace-match (nth 0 meta) t t))
-						(goto-char (point-min))
-						(while (search-forward "{{{date}}}" nil t) (replace-match (nth 1 meta) t t))
-						(goto-char (point-min))
-						(while (search-forward "{{{desc}}}" nil t) (replace-match (nth 3 meta) t t))
-						(goto-char (point-min))
-						(while (search-forward "{{{filename}}}" nil t) (replace-match (nth 2 meta) t t))
-						(buffer-string)))))))
+      ;; Skip files that start with a dot (like hidden or backup files)
+      (unless (string-match-p "\\(^\\|/\\)\\." (file-relative-name file posts-dir))
+        (let* ((meta (my/get-org-file-metadata file posts-dir))
+               (is-draft (nth 4 meta)))
+          (unless (equal is-draft "true")
+            (setq items-html (concat items-html (with-temp-buffer 
+                                                  (insert-file-contents template-file)
+                                                  (goto-char (point-min))
+                                                  ;; Replace our placeholders with actual data
+                                                  (while (search-forward "{{{title}}}" nil t) (replace-match (nth 0 meta) t t))
+                                                  (goto-char (point-min))
+                                                  (while (search-forward "{{{date}}}" nil t) (replace-match (nth 1 meta) t t))
+                                                  (goto-char (point-min))
+                                                  (while (search-forward "{{{desc}}}" nil t) (replace-match (nth 3 meta) t t))
+                                                  (goto-char (point-min))
+                                                  (while (search-forward "{{{filename}}}" nil t) (replace-match (nth 2 meta) t t))
+                                                  (buffer-string))))))))
 
     ;; 3. Read the main template, swap the {{{posts}}} tag, and write to dist/index.html
     (with-temp-file output-index
