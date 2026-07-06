@@ -7,7 +7,7 @@
 #+DATE: 2026-07-06
 #+DESCRIPTION: After building rules of composition, we turn out attention to another problem: Representing state.
 
-In the previous post, we described games as graphs of event
+In the [[file:Games-as-Graphs.org][previous post]], we described games as graphs of event
 transformations. This shifted the focus from frame-based execution
 toward compositional behaviour, where interactions are defined by how
 events produce other events.

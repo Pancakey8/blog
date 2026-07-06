@@ -79,11 +79,19 @@
       ;; The file is automatically saved to output-index when this block ends
       (message "Successfully generated %s" output-index))))
 
+(defvar my-project-root (expand-file-name default-directory))
+
 (setq org-publish-project-alist
       '(("blog-posts"
 	 :base-directory "./posts/"
 	 :base-extension "org"
 	 :exclude "\\(^\\|/\\)\\..*\\.org$"
+	 :with-html-preamble t
+	 :html-preamble (lambda (options)
+                          (with-temp-buffer
+                            ;; Dynamically builds the absolute path from your initial project root
+                            (insert-file-contents (expand-file-name "posts/.post-preamble.html" my-project-root))
+                            (buffer-string)))
 	 :publishing-directory "./dist/posts"
 	 :recursive t
 	 :publishing-function org-html-publish-to-html)

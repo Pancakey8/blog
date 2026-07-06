@@ -376,7 +376,7 @@ However, the architecture hasn't reached a satisfying conclusion
 yet. So far, we have ignored state, only focusing on events. Since the
 event graph implies nothing about state dependencies, we can only
 assume all state is effectively global. There is no need to worry,
-however, as the second post in the series discusses how state can be
+however, as the [[file:Game-State.org][second post]] in the series discusses how state can be
 localized in a reactive system.
 
 Moreover, readers who are observant may have noticed that the
