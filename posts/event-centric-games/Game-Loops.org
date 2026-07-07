@@ -2,8 +2,87 @@
 
 #+INCLUDE: ../.post-header.org
 
-#+TITLE: Managing Loops in Event-centric Games
+#+TITLE: (Draft) Managing Loops in Event-centric Games
 #+AUTHOR: Pancake
 #+DATE: 2026-07-07
 #+DESCRIPTION: TODO
+#+DRAFT: true
 
+The first two posts introduced composition rules and state management
+for event graphs. However, the existing systems only represent
+directed acyclic graphs (DAG), lacking structural loops. Many game
+systems, such as asynchronous tasks, AI handling, and network
+connections require looping behaviour.
+
+This behaviour can be implemented within individual interactions,
+preserving DAG structure. While this ensures that composition cannot
+infinite loop, it hides critical game behaviour, fading temporal
+structure into implementation details rather than structure.
+
+In this post, we make temporal feedback explicit by extending the
+composition rules with a new primitive. We then use the state
+structure from the previous post to construct job queues that
+asynchronously execute bounded tasks. Finally, we demonstrate that the
+structural constraints imposed on state ensure that cycles remain
+progressive, preserving the key benefits of acyclic design.
+
+** Temporal Behaviour: Loop Primitive
+
+Game systems often require tasks to be executed over time. For
+instance, animation state, game saves, and ability cooldowns are
+periodic tasks that occur across multiple frames. These tasks carry
+context across frames. The previous post established that persisting a
+context requires state. Then, any temporal behaviour requires some
+state attached to it.
+
+Expressing these behaviours in events only is then
+impossible. However, passing state as events is possible, enabling the
+loop primitive. If an interaction preserves a component of an event,
+then that component can be extracted into state, turning the
+interaction into a state machine:
+
+#+BEGIN_SRC dot :file game-loops-prim-1.svg :exports results
+  digraph G {
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
+
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+
+      subgraph cluster_post {
+          label="Looped";
+          style=dashed;
+          color=lightgrey;
+          labelloc=b;
+
+          { rank=same; PlayerMove1; Animation1; }
+
+          Animation1 -> Animation1 [headlabel="from state",labeldistance=5];
+
+          PlayerMove1 -> PhysicsUpdate1;
+
+          Animation1 -> PlayerMove1 [style=invis];
+
+          Animation1 [label="Animation"];
+          PlayerMove1 [label="PlayerMove"];
+          PhysicsUpdate1 [label="PhysicsUpdate"];
+      }
+
+      subgraph cluster_pre {
+          label="Interaction";
+          style=dashed;
+          color=lightgrey;
+          labelloc=t;
+
+          Animation -> Animation2;
+          Animation2 [label="Animation"];
+
+          PlayerMove -> PhysicsUpdate;
+      }
+  }
+#+END_SRC
+
+#+RESULTS:
+[[file:game-loops-prim-1.svg]]

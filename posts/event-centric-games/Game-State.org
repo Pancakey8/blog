@@ -17,7 +17,7 @@ structure. State is still required for transformations, yet it is not
 organised by the graph. Instead, it is implicitly shared across the
 system, accessed without regard to causal boundaries.
 
-This post introduces a way to localize state boundaries within the
+This post introduces a way to localise state boundaries within the
 event structure while preserving a single, global view of the
 world. The result is a model where state becomes part of the same
 compositional system as events, rather than an external layer. More
@@ -27,7 +27,7 @@ only a byproduct of the representation introduced here, these
 invariants become the key ingredient in constructing a safe
 asynchronous scheduler in the next post.
 
-** Localized Access to a Global World: Projections
+** Localised Access to a Global World: Projections
 
 In games, most interactions act on natural data boundaries. For
 example, a physics step doesn't need to know about UI rendering
@@ -212,7 +212,7 @@ than 512 physics interactions per-frame.
 
 ** Conclusion
 
-In this post, we extended the event graph with a notion of localized
+In this post, we extended the event graph with a notion of localised
 state. Rather than treating state as a globally accessible resource,
 each interaction now operates on a projection of a single world
 state. Masks describe these projections independently of the event
@@ -224,10 +224,10 @@ carries structural information about the game itself. Since events are
 transient while state persists, any invariant that should hold
 throughout execution naturally becomes part of the world
 representation. These guarantees are not introduced through additional
-runtime mechanisms, but emerge from the organization of state itself.
+runtime mechanisms, but emerge from the organisation of state itself.
 
 However, one significant gap remains. Although interactions now
-compose over both events and localized state, our composition model
+compose over both events and localised state, our composition model
 still describes only acyclic propagation of behaviour. Many gameplay
 systems, including asynchronous job execution, deferred work, and
 iterative processing, require behaviour that feeds back into the
