@@ -8,9 +8,9 @@
 #+DESCRIPTION: After building rules of composition, we turn out attention to another problem: Representing state.
 
 In the [[file:Games-as-Graphs.org][previous post]], we described games as graphs of event
-transformations. This shifted the focus from frame-based execution
-toward compositional behaviour, where interactions are defined by how
-events produce other events.
+transformations. This shifted the focus from ordered execution toward
+compositional behaviour, where interactions are defined by how events
+produce other events.
 
 This representation captures causality, but leaves state outside the
 structure. State is still required for transformations, yet it is not
@@ -22,21 +22,20 @@ event structure while preserving a single, global view of the
 world. The result is a model where state becomes part of the same
 compositional system as events, rather than an external layer. More
 importantly, treating persistent state as part of the structure of the
-game causes useful invariants to emerge automatically. While they are
+game lets useful invariants to emerge automatically. While they are
 only a byproduct of the representation introduced here, these
 invariants become the key ingredient in constructing a safe
 asynchronous scheduler in the next post.
 
 ** Localized Access to a Global World: Projections
 
-In games, most interactions only depend on narrow slices of the
-collective state. For example, a physics step doesn't need to know
-about UI rendering details. Likewise, the UI state doesn't depend on
-the states of physics bodies. Each system acts on a narrow context,
-even though the system as a whole contains more information. This
-suggests that distinct pieces of data live alongside one another,
-which can be collected into one tuple representing the complete state
-of the world.
+In games, most interactions act on natural data boundaries. For
+example, a physics step doesn't need to know about UI rendering
+details. Likewise, the UI state doesn't depend on the states of
+physics bodies. Each system acts on a narrow context, even if the
+system as a whole contains more information. This suggest that
+distinct pieces of data live alongside one another, which can be
+collected in one tuple representing the state of the whole game.
 
 To illustrate, let's reintroduce the game demo from the previous post:
 
@@ -63,9 +62,8 @@ constructed as:
 The mask represents an access pattern to the global state
 tuple. However, the mask yields no information on its own, it only
 specifies which components are visible. Applying the mask requires a
-/projection function/. The function extracts the slots of data marked
-~Keep~, leaving out the other components. The workflow is illustrated
-below:
+/projection function/, which extracts the slots of data marked ~Keep~,
+leaving out the other components. The workflow is illustrated below:
 
 #+BEGIN_SRC dot :file game-state-projection.svg :exports results
   graph G {
@@ -140,10 +138,10 @@ tuples from local data automatically. Rather than specifying a magic
 tuple, we may specify ~(Balls, PhysicsUnit)~, and get back,
 ~(Keep, Skip, Keep, Skip)~ automatically.
 
-Most static languages would model this by mapping data to IDs or
-enums, then defining data requirements by referring to these
-enums. Some languages would offer /reflection/, which would allow
-direct inspection of types, avoiding the manual mapping to IDs.
+Most static languages model this by mapping data to IDs or enums, then
+defining data requirements by referring to these enums. Some languages
+offer /reflection/, which allows direct inspection of types, avoiding
+the manual mapping to IDs.
 
 In /Idris/, the language used to implement the game demo, there is a
 third option which completely hides the construction of masks from the
@@ -164,7 +162,8 @@ arbitrarily, the rules must be presented concretely:
  3. If the first components don't match, pop only ~great~ and emit
     ~Skip~.
  4. Once ~small~ is empty, emit ~Empty~, which skips the remainder of
-    ~great~.
+    ~great~. If ~great~ runs out first, then fail construction, since
+    ~small~ is then not a valid local state for ~great~.
 
 Below is a snippet from the Idris REPL that demonstrates the
 construction:
@@ -201,8 +200,8 @@ detail. The tuple also describes structural properties that cannot
 change during execution. For example, if the game defines that the map
 is a ~Vect 10 Surface~, then it is structurally fixed that the game
 carries only 10 surfaces. Interactions can modify the contents of this
-vector, they can choose to omit handling surfaces at some indices, but
-it is structurally fixed that the system can't represent 15 surfaces.
+vector, they can ignore some or all surfaces, but they can't construct
+~15~ surfaces, as ~Vect 10~ doesn't have enough space for it.
 
 In the [[file:Game-Loops.org][next post]], this system is used to express structured task
 scheduling, where a statically fixed budget will be allocated to

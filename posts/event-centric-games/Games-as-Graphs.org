@@ -9,16 +9,15 @@
 
 Traditionally, most game architectures are built around an explicit
 execution loop. Each frame executes a fixed sequence of actions. This
-style of architecture prioritises functions that operate on
-state. This yields a system which /proactively/ polls and acts on the
-world in fixed iterations.
+style of architecture prioritises functions that operate on state,
+yielding a system which /proactively/ polls and acts on the world in
+fixed iterations.
 
 In this post, we construct an alternative architecture, where games
-are built on networks of /reactive/ transformations. We interpret
-games in terms of how they consume and propagate changes through
-structured interactions. This shift emphasises causality over
-sequencing: The cause of a behaviour are as important as behaviour
-itself.
+are built on networks of /reactive/ transformations. In this framing,
+games are interpreted by how they react to and propagate changes. The
+architectural shift will emphasise causality over sequencing, enabling
+a compositional approach to game development.
 
 ** Objects to Systems: OOP and ECS as Foundations
 
@@ -48,14 +47,15 @@ inefficient, leading many engines to develop event-driven layers on
 top of their core loop, using systems such as event buses, delegates,
 and message systems.
 
-These systems generally achieve behaviour by means that remain
-external to the system, such as callbacks or shared message
-buses. This achieves reactive behaviour at runtime, yet obscures the
-structure of interactions, meaning that proactive architectures like
-ECS remain inadequate at clarifying behaviour at the same level as
-data. Without a structured approach, the exact origins of behaviour
-become harder to trace, hindering debugging efforts and requiring
-extensive documentation in team environments to express intentions.
+These systems generally achieve reactive behaviour through means that
+remain external to the system, such as callbacks or shared message
+buses. Through these methods, the system achieves reactive behaviour
+at runtime, yet obscures the structure of interactions, meaning that
+proactive architectures like ECS remain inadequate at clarifying
+behaviour at the same level as data. Without a structured approach,
+the exact origins of behaviour become harder to trace, hindering
+debugging efforts and requiring extensive documentation of code to
+express intentions.
 
 Then, in analysing games under the alternative approach, our goal is
 not to reintroduce existing reactive behaviour. Instead, our goal is
@@ -65,22 +65,23 @@ by placing reactions to the forefront of our approach.
 ** Structured Reactivity
 
 Modelling reactivity is possible in multiple ways. Our model will use
-events, which act as discrete facts of the world. Events provide an
-anchor for a structure to form. More importantly, events are not
-uniquely an interpretation. In any reactive system, conditions for
-various reactions exist, and since events only represent conditions,
-they are present in reactive systems implicitly or
-explicitly. However, keeping them implicit as in ECS architectures
-hides an induced structure between the events and the handlers of
-events. Thus, making events first-class is beneficial to our goal.
+events, which act as discrete facts of the world. Events act as
+anchors for reactions to attach to, allowing rigid structures to
+form. More importantly, events are not solely an interpretation. In
+any reactive system, a certain basis exists for all responses, and
+since events only represent facts of the world, they are present in
+reactive systems either implicitly or explicitly. Keeping events
+implicit, as in ECS architectures, hides an induced structure between
+the events and the handlers of events, directing us to an
+event-centric approach to reactivity.
 
 The event-based approach shifts focus from state and systems toward
 only causality. For example, a ~KeyboardEvent~ triggers a
 ~PlayerMove~, or a ~TakeDamage~ triggers a ~SoundEffect~; in each
 case, interactions are modelled through the consumption and emission
 of events, with events representing the cause a specific behaviour
-arises from. In this model, the observable patterns of interactions
-are defined by the causal chains they depend on and satisfy.
+arises from. In this model, the causal chains define the patterns of
+interactions.
 
 These interactions never live in isolation: Each interaction takes
 inputs from a previous interaction, all the way up to the outside
@@ -173,11 +174,11 @@ is expressed implicitly or explicitly in the implementation.
 Achieving a structural representation isn't enough for our goal, we
 now look to construct the graph step-by-step. Just as a proactive
 framework builds games in ordered steps, a way of constructing
-event-based graphs is now mandatory. Choosing a building block is
-crucial, and the smallest expressive units in the graph are events;
-even so, events only describe facts, and they themselves carry no
-transformative power. Thus, the individual interactions are the
-smallest units that also express behaviour.
+event-based graphs is now mandatory. Firstly, choosing a building
+block is crucial, and the smallest expressive units in the graph are
+events; even so, events only describe facts, and they themselves carry
+no transformative power. Thus, our building blocks are the smallest
+units that carry behaviour, which are individual interactions.
 
 To bridge the gap between individual interactions and larger system
 graphs, we define ways to assemble interactions. Without these
@@ -186,10 +187,11 @@ constructive.
 
 ** An Algebra of Interactions
 
-A graph can be branching, converging, detached, chained or
-more. Representing all the shapes of complex graphs with a singular
-primitive composition is not possible. Instead, we develop a set of
-primitive operations, each composing interactions in different shapes.
+A graph can contain branching, converging, detached, and linked shapes
+among others. Representing all the shapes of complex graphs with a
+singular primitive composition is not possible. Instead, we develop a
+set of primitive operations, each composing interactions in different
+shapes.
 
 *** Parallel composition
 
@@ -198,9 +200,10 @@ composition allows for interactions, each handling one independent
 piece of an event, to be composed into a larger interaction.
 
 For example, both ~GameTick~ and ~Event~ originate from the outside
-world, but they are treated as causally independent. Interactions
-based on ~GameTick~ can then parallel compose with interactions based
-on ~Event~. This is represented with detached pieces on the diagram.
+world, but they are treated as causally independent, even if the event
+source is the same. Interactions based on ~GameTick~ can then parallel
+compose with interactions based on ~Event~. This is represented with
+detached pieces on the diagram.
 
 #+BEGIN_SRC dot :file games-as-graphs-parallel.svg :exports results
   digraph G {
@@ -224,9 +227,9 @@ on ~Event~. This is represented with detached pieces on the diagram.
 
 *** Sequenced composition
 
-When the emission of one transformation matches the trigger of
-another, the transformations can be chained, forming causal steps,
-where a long process is broken up with intermediary events.
+When the output of one transformation matches the input of another,
+the transformations can be chained, forming causal steps, where a long
+process is broken up with intermediary events.
 
 The example game has an asynchronous physics system, where a large
 physics task is first created, then executed over time, and finally
@@ -260,8 +263,8 @@ form a long causal chain.
 A single event can feed multiple downstream interactions, allowing
 divergent behaviour to develop.
 
-To illustrate, the single ~Event~, a variant type of mouse events,
-induces multiple actions relating to ball and surface creation.
+To illustrate, ~Event~ can be one of many mouse events, and it can
+cause one of many actions relating to ball and surface creation.
 
 #+BEGIN_SRC dot :file games-as-graphs-fanout.svg :exports results
   digraph G {
@@ -299,9 +302,9 @@ Multiple distinct transformations may converge into a single
 downstream interaction. In this case, different causal paths unify
 into a shared consequence.
 
-In the context of the game, physics follows independent branches,
-where some frames form new physics jobs, and some don't. However, the
-two branches converge, both executing physics.
+In the context of the game, game ticks sometimes omit the creation of
+a new physics task. However, whether a task is created or not, both
+paths converge to the execution of physics.
 
 #+BEGIN_SRC dot :file games-as-graphs-fanin.svg :exports results
   digraph G {
