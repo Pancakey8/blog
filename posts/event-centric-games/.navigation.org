@@ -2,7 +2,7 @@
 
 This post is a part of a larger series. Please read in order.
 
-#+BEGIN_SRC emacs-lisp :var files='("Games-as-Graphs.org" "Game-State.org") :exports results :results raw
+#+BEGIN_SRC emacs-lisp :var files='("Games-as-Graphs.org" "Game-State.org" "Game-Loops.org") :exports results :results raw
   (mapconcat
    (lambda (file)
      (let* ((current-file (buffer-file-name))
@@ -25,5 +25,3 @@ This post is a part of a larger series. Please read in order.
    files
    "\n")
 #+END_SRC
-
-- /Under Construction: Part three/

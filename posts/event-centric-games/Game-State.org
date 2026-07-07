@@ -204,7 +204,7 @@ carries only 10 surfaces. Interactions can modify the contents of this
 vector, they can choose to omit handling surfaces at some indices, but
 it is structurally fixed that the system can't represent 15 surfaces.
 
-In the next post, this system is used to express structured task
+In the [[file:Game-Loops.org][next post]], this system is used to express structured task
 scheduling, where a statically fixed budget will be allocated to
 queues of various tasks. This allows the performance of a game to be
 predictable. For example, fixing ~PhysicsSlot~ as a job slot of ~512~
@@ -232,7 +232,7 @@ compose over both events and localized state, our composition model
 still describes only acyclic propagation of behaviour. Many gameplay
 systems, including asynchronous job execution, deferred work, and
 iterative processing, require behaviour that feeds back into the
-system over time. In the final post of this series, we introduce the
+system over time. In the [[file:Game-Loops.org][final post]] of this series, we introduce the
 primitives required to express these cyclic interactions, showing how
 event graphs can model bounded asynchronous execution while preserving
 the structural guarantees developed here.

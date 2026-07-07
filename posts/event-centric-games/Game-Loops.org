@@ -1,0 +1,9 @@
+#+INCLUDE: ".navigation.org"
+
+#+INCLUDE: ../.post-header.org
+
+#+TITLE: Managing Loops in Event-centric Games
+#+AUTHOR: Pancake
+#+DATE: 2026-07-07
+#+DESCRIPTION: TODO
+
