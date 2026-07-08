@@ -2,46 +2,37 @@
 
 #+INCLUDE: ../.post-header.org
 
-#+TITLE: (Draft) Managing Loops in Event-centric Games
+#+TITLE: Managing Loops in Event-centric Games
 #+AUTHOR: Pancake
 #+DATE: 2026-07-07
-#+DESCRIPTION: TODO
-#+DRAFT: true
+#+DESCRIPTION: We introduce feedback as the final primitive of event composition, expressing persistence and bounded asynchronous execution.
 
-The first two posts introduced composition rules and state management
-for event graphs. However, the existing systems only represent
-directed acyclic graphs (DAG), lacking structural loops. Many game
-systems, such as asynchronous tasks, AI handling, and network
-connections require looping behaviour.
+The first two posts introduced composition rules and localised state
+for event graphs. Together, they enable a description of games as
+networks of interactions operating on portions of a global
+world.
 
-This behaviour can be implemented within individual interactions,
-preserving DAG structure. While this ensures that composition cannot
-infinite loop, it hides critical game behaviour, fading temporal
-structure into implementation details rather than structure.
+The resulting networks are directed acyclic graphs (DAGs), leaving a
+class of behaviour unrepresented. Many game systems persist beyond the
+events triggering them. Animations, network connections and more
+execute across many frames, carrying behaviour across time.
 
-In this post, we make temporal feedback explicit by extending the
-composition rules with a new primitive. We then use the state
-structure from the previous post to construct job queues that
-asynchronously execute bounded tasks. Finally, we demonstrate that the
-structural constraints imposed on state ensure that cycles remain
-progressive, preserving the key benefits of acyclic design.
+In this post, we introduce temporal feedback as the final primitive of
+event composition. Feedbacks lift transient interactions into
+persistent processes, making temporal behaviour explicit. Building on
+this, we show that asynchronous schedulers and traditional game loops
+emerge naturally from the same event-centric representation.
 
-** Temporal Behaviour: Loop Primitive
+** Persistent Behaviour
 
-Game systems often require tasks to be executed over time. For
-instance, animation state, game saves, and ability cooldowns are
-periodic tasks that occur across multiple frames. These tasks carry
-context across frames. The previous post established that persisting a
-context requires state. Then, any temporal behaviour requires some
-state attached to it.
+Events are transient. Interactions arising from events form new
+events, expressing chain reactions. However, no event persists to the
+next execution. Persisting behaviour requires events that can feed
+back into the next execution, requiring cyclic representation on
+graphs. The simplest cycle is reflexive, an event transforming to
+itself.
 
-Expressing these behaviours in events only is then
-impossible. However, passing state as events is possible, enabling the
-loop primitive. If an interaction preserves a component of an event,
-then that component can be extracted into state, turning the
-interaction into a state machine:
-
-#+BEGIN_SRC dot :file game-loops-prim-1.svg :exports results
+#+BEGIN_SRC dot :file game-loops-reflexive.svg :exports results
   digraph G {
       rankdir=LR;
       fontname="Arial";
@@ -51,38 +42,245 @@ interaction into a state machine:
 
       node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
 
-      subgraph cluster_post {
-          label="Looped";
-          style=dashed;
-          color=lightgrey;
-          labelloc=b;
+      Animation -> Animation;
+  }
+#+END_SRC
 
-          { rank=same; PlayerMove1; Animation1; }
+#+RESULTS:
+[[file:game-loops-reflexive.svg]]
 
-          Animation1 -> Animation1 [headlabel="from state",labeldistance=5];
+Reflexive cycles lack a per-execution trigger. The only way to
+interpret them is as atomic machines that run until termination. This
+only expresses recursion, lacking persistence. A cycle can only
+persist if it can be tied to a trigger than iterates it.
 
-          PlayerMove1 -> PhysicsUpdate1;
+#+BEGIN_SRC dot :file game-loops-dependent.svg :exports results
+  digraph G {
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
 
-          Animation1 -> PlayerMove1 [style=invis];
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
 
-          Animation1 [label="Animation"];
-          PlayerMove1 [label="PlayerMove"];
-          PhysicsUpdate1 [label="PhysicsUpdate"];
-      }
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
 
-      subgraph cluster_pre {
-          label="Interaction";
+      GameTick -> Dots;
+      Animation -> Animation [headport=e, tailport=e];
+      GameTick -> Animation [style="dashed", dir=none];
+      Dots [label="..."];
+
+      { rank=same; GameTick; Animation; }
+  }
+#+END_SRC
+
+#+RESULTS:
+[[file:game-loops-dependent.svg]]
+
+Now, the system requires a new game tick before iterating animation
+again. However, since events are transient, a cycle like this requires
+state to store its output until the next execution. We introduce a new
+primitive operation to bridge the gap.
+
+** Loop Primitive
+
+The loop operation forms a delayed cycle from the output of an
+interaction to its input. The iterations are tied to another event,
+delaying the feedback until the next execution. For example, an
+interaction iterating animations is looped as below, forming the
+example from the previous section.
+
+#+BEGIN_SRC dot :file game-loops-primitive.svg :exports results
+  digraph G {
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
+
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+
+      subgraph cluster_looped {
+          label="After";
           style=dashed;
           color=lightgrey;
           labelloc=t;
+          GameTick -> Dots;
+          Animation -> Animation [headport=e, tailport=e];
+          GameTick -> Animation [style="dashed", dir=none];
+          Dots [label="..."];
+          { rank=same; GameTick; Animation; }
+      }
 
-          Animation -> Animation2;
-          Animation2 [label="Animation"];
-
-          PlayerMove -> PhysicsUpdate;
+      subgraph cluster_unlooped {
+          label="Before";
+          style=dashed;
+          color=lightgrey;
+          labelloc=t;
+          GameTickt -> Dotst;
+          Animationt -> Animationt2;
+          GameTickt -> Animationt [style="dashed", dir=none];
+          Dotst [label="..."];
+          GameTickt [label="GameTick"];
+          Animationt [label="Animation"];
+          Animationt2 [label="Animation"];
+          { rank=same; GameTickt; Animationt; }
+          { rank=same; Animationt2 -> Animation [style=invis]; }
       }
   }
 #+END_SRC
 
 #+RESULTS:
-[[file:game-loops-prim-1.svg]]
+[[file:game-loops-primitive.svg]]
+
+This operation lifts the output of an interaction into persistent
+state, treating it as ordinary data. Once stored, the data no longer
+acts as the causal trigger of future computations. Instead, subsequent
+triggering events reintroduce it into the interaction. Conceptually, a
+value is only an event while it represents a transient
+occurrence. Once retained as persistent state, it loses that causal
+role and becomes part of the mechanical structure of the system.
+
+This distinction reveals an important role of external events. At the
+core of the reactive approach, each interaction require an event to
+execute. Due to this, the overall system of a game first starts with
+external events. Without external events, the game loop executes
+unbounded.
+
+The external boundary acts as an anchor of the system, defining
+persistence as the data carried between executions. Using this anchor
+as a trigger, the global world state can be expressed as a feedback
+loop, using the loop primitive. This represents the game as a
+persistent process driven by external events.
+
+#+BEGIN_SRC dot :file game-loops-world.svg :exports results
+  digraph G {
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.8;
+
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+
+      External -> Dots;
+      WorldState -> WorldState [headport=e, tailport=e];
+      External -> WorldState [style="dashed", dir=none];
+      Dots [label="..."];
+
+      { rank=same; External; WorldState; }
+  }
+#+END_SRC
+
+#+RESULTS:
+[[file:game-loops-world.svg]]
+
+The loop operation introduces a new constraint. Processes expressed
+with loops exist across all executions. This behaviour is suitable for
+processes that live through the game, such as network connections,
+animations or world updates, but incompatible with terminating
+processes directly. Once a process becomes part of persistent state,
+it must be accounted for each execution, even after logical
+completion. This leads to a proactive poll that remains outside the
+model. For finite processes, the persistent property isn't the process
+itself, but the capability of execution. Using this, we build job
+schedulers.
+
+** Jobs as Budgeted Slots
+
+A terminating process follows a different temporal structure than a
+persistent one. Though it may require multiple frames to complete, it
+is not a permanent part of the game. Therefore, a job does not provide
+means of persistence itself; rather, it is represented as an event
+describing work. Persistence instead belongs to a structure executing
+the job: a job slot.
+
+Job slots represent fixed execution capability within the world
+state. Instead of storing different jobs independently, the game
+allots statically defined budgets to various kinds of jobs. Each slot
+captures a job event, advances it over time, and eventually emits a
+result. Since the slot organises jobs, it is implemented as a
+scheduler, using algorithms such as round robin. The game demo from
+the previous posts uses this to represent physics,
+
+#+BEGIN_SRC dot :file games-loops-scheduler.svg :exports results
+  digraph G {
+      rankdir=LR;
+      fontname="Arial";
+      nodesep=0.6;
+      ranksep=0.8;
+      splines=true;
+
+      node [shape=circle, style="rounded,filled", width=0.6, fixedsize=true, fillcolor="#e1f5fe", fontname="Arial"];
+      choice [label="or"];
+
+      node [shape=box, fillcolor="#f7f7f7", width=default, fixedsize=false];
+      
+      edge [weight=10];
+      PhysicsExecute -> choice -> PhysicsResult;
+
+      edge [weight=1];
+      Null -> PhysicsExecute;
+      PhysicsJob -> PhysicsExecute;
+
+      choice -> PhysicsExecute [label="Loop", constraint=false];
+  }
+#+END_SRC
+
+#+RESULTS:
+[[file:games-loops-scheduler.svg]]
+
+The system uses the fan-in operation to converge on execution. Then,
+it uses the loop operation to persist the job slot, executing up to
+budget each frame, whether a new job is registered or not. The jobs
+themselves move into the job slot and execute, emitting a result at a
+later frame. Overall, the system combines concepts from all three
+posts.
+
+Since the job slots are budgeted, overloading one part of the system
+only slows down that specific system. For example, even if the physics
+slot is overloaded, the UI updates happen at a stable pace. The only
+delays occur in physics resolution where, with enough scheduled jobs,
+the game updates physics processes once every few frames instead of a
+clean update each frame.
+
+However, the scheduler budget only represents a per-frame cost. A
+single job can still occupy space in a scheduler indefinitely if its
+not proven to terminate, preventing other jobs from making progress.
+
+Individual jobs also carry an upper bound to ensure termination. A job
+with type ~Job n~ guarantees termination in at most ~n~
+iterations. The bound isn't a property of the scheduler, but belongs
+to jobs intrinsically. For many game actions, these bounds are
+practical, as world updates, collision checks, and pathfinding over
+bounded space operate on finite possibilities. These bounds ensure
+that the architecture can reason about the maximum work a task
+requires without runtime tracking.
+
+** Final Thoughts
+
+Together, the three posts define a complete architecture for game
+creation. To sum up, the architecture approaches games as state
+machines that evolve through a network of structured interactions. The
+interactions are triggered by external events, making the approach
+reactive as opposed to proactive.
+
+Games are constructed compositionally, building event graphs from
+primitive operations. The previous post as well as this post explore
+ways of making the graph representative of more things, first focusing
+on state, then on behaviour. In the end, the system offers a uniform
+approach to events and state, distinguishing them not by their
+representation, but by their temporal structure.
+
+A large part of this representation was enabled by the language
+capabilities of Idris. Dependent types allow masks, projections, job
+budgets, and execution bounds to be expressed together with the
+programs they constrain. However, this is not specific to a language;
+the architecture exposes relationships that can be checked
+mechanically.
+
+The deeper connection extends beyond games, many complex systems are
+described as sequences of execution. However, the execution itself
+results from a structure defined by the relationship of events, state,
+and transformations. Highlighting this structure changes how systems
+are understood. Instead of relying on conventions and runtime
+behaviour, systems can become sources of information themselves.
